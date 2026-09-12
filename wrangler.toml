@@ -1,10 +1,13 @@
+# Cloudflare Pages (не Worker)
 name = "planer-tma"
 compatibility_date = "2025-01-01"
 pages_build_output_dir = "."
 
-# Создайте KV namespace в Cloudflare Dashboard и подставьте id:
-# wrangler kv namespace create PLANER_KV
-[[kv_namespaces]]
-binding = "PLANER_KV"
-id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"
-preview_id = "REPLACE_WITH_YOUR_KV_PREVIEW_ID"
+# KV: создайте namespace в Dashboard и подставьте реальный id,
+# либо привяжите PLANER_KV в Settings → Functions проекта Pages.
+# Пока id не подставлен — закомментируйте блок ниже и вяжите KV в Dashboard.
+
+# [[kv_namespaces]]
+# binding = "PLANER_KV"
+# id = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+# preview_id = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
