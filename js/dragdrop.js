@@ -87,7 +87,7 @@ export function enableDragDrop(listEl, { onReorder }) {
   function onPointerDown(e) {
     if (!document.body.classList.contains("edit-mode")) return;
     if (e.target.closest(".task-row.sub")) return;
-    if (e.target.closest("[data-delete], .delete-btn")) return;
+    if (e.target.closest("[data-delete], .delete-btn, [data-delete-sub]")) return;
 
     const card = e.target.closest(".task-card");
     if (!card || !listEl.contains(card)) return;

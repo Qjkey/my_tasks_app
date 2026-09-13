@@ -87,7 +87,10 @@ function setDone(id, value) {
 }
 
 function taskComplete(task) {
-  if (task.subtasks?.length) return task.subtasks.every((s) => isDone(s.id));
+  if (task.subtasks?.length) {
+    if (isDone(task.id)) return true;
+    return task.subtasks.every((s) => isDone(s.id));
+  }
   return isDone(task.id);
 }
 
@@ -116,10 +119,17 @@ function renderTasks() {
 
   $("#current-day-label").textContent = capitalize(state.selectedDay);
 
+  // в режиме редактирования все списки раскрыты
+  if (state.editMode) {
+    for (const task of tasks) {
+      if (task.subtasks?.length) state.expanded.add(task.id);
+    }
+  }
+
   list.innerHTML = tasks
     .map((task) => {
       const hasSubs = task.subtasks?.length > 0;
-      const expanded = state.expanded.has(task.id);
+      const expanded = state.editMode ? hasSubs : state.expanded.has(task.id);
       const done = taskComplete(task);
 
       const subs = hasSubs
@@ -129,6 +139,11 @@ function renderTasks() {
                 (s) => `<div class="task-row sub" data-sub-id="${s.id}" data-parent="${task.id}">
                   <button type="button" class="check ${isDone(s.id) ? "done" : ""}" data-toggle="${s.id}" aria-label="Готово"></button>
                   <span class="task-title ${isDone(s.id) ? "done" : ""}">${escapeHtml(s.title)}</span>
+                  ${
+                    state.editMode
+                      ? `<button type="button" class="delete-btn sub-delete" data-delete-sub="${s.id}" data-parent="${task.id}" aria-label="Удалить подзадачу">${DELETE_ICON}</button>`
+                      : ""
+                  }
                 </div>`
               )
               .join("")}
@@ -296,7 +311,6 @@ function deleteTask(taskId) {
   const task = tasks.find((t) => t.id === taskId);
   if (!task) return;
 
-  // убрать отметки
   const map = doneMap();
   delete map[taskId];
   for (const s of task.subtasks || []) delete map[s.id];
@@ -307,6 +321,30 @@ function deleteTask(taskId) {
 
   const remaining = buildDayTasks(state.store, dayName, dateKey);
   state.store.order[dateKey] = remaining.map((t) => t.id);
+
+  renderTasks();
+  persist();
+  tg()?.HapticFeedback?.impactOccurred?.("medium");
+}
+
+function deleteSubtask(parentId, subId) {
+  const dateKey = dateKeyForSelectedDay();
+  const dayName = state.selectedDay;
+
+  const map = doneMap();
+  delete map[subId];
+
+  const extras = state.store.extraTasks[dateKey] || [];
+  const ei = extras.findIndex((t) => t.id === parentId);
+  if (ei >= 0) {
+    extras[ei].subtasks = (extras[ei].subtasks || []).filter((s) => s.id !== subId);
+  } else {
+    const dayList = state.store.days[dayName] || [];
+    const di = dayList.findIndex((t) => t.id === parentId);
+    if (di >= 0) {
+      dayList[di].subtasks = (dayList[di].subtasks || []).filter((s) => s.id !== subId);
+    }
+  }
 
   renderTasks();
   persist();
@@ -401,6 +439,13 @@ function bindEvents() {
   $("#btn-back-week").addEventListener("click", () => setTab("week"));
 
   $("#task-list").addEventListener("click", (e) => {
+    const delSub = e.target.closest("[data-delete-sub]");
+    if (delSub) {
+      e.stopPropagation();
+      deleteSubtask(delSub.dataset.parent, delSub.dataset.deleteSub);
+      return;
+    }
+
     const del = e.target.closest("[data-delete]");
     if (del) {
       e.stopPropagation();
@@ -445,6 +490,10 @@ function bindEvents() {
           const parentId = parentRow.dataset.parent;
           const parent = tasks.find((t) => t.id === parentId);
           if (parent) setDone(parent.id, taskComplete(parent));
+        } else if (task?.subtasks?.length) {
+          // клик по заголовку списка без parent-toggle — синхронизируем подзадачи
+          const next = isDone(id);
+          for (const s of task.subtasks) setDone(s.id, next);
         }
       }
 

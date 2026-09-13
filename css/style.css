@@ -1,3 +1,11 @@
+@font-face {
+  font-family: "SF Pro";
+  src: url("../SF-Pro-Display-Bold.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   --bg: var(--tg-theme-secondary-bg-color, #1c1c1e);
   --bg-elevated: var(--tg-theme-bg-color, #2c2c2e);
@@ -8,7 +16,7 @@
   --accent: var(--tg-theme-button-color, #3390ec);
   --accent-soft: var(--tg-theme-button-color, #3390ec);
   --button-text: var(--tg-theme-button-text-color, #ffffff);
-  --flame: #ff9500;
+  --flame: var(--tg-theme-button-color, #3390ec);
   --nav-active: var(--tg-theme-section-bg-color, rgba(255, 255, 255, 0.08));
   --border: rgba(255, 255, 255, 0.06);
   --danger: #ff453a;
@@ -16,7 +24,7 @@
   --radius-press: 4px;
   --radius-edge: 20px;
   --safe-bottom: env(safe-area-inset-bottom, 0px);
-  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+  --font: "SF Pro", -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Segoe UI", sans-serif;
 }
 
 *,
@@ -37,6 +45,12 @@ body {
   -webkit-tap-highlight-color: transparent;
   overflow: hidden;
   user-select: none;
+}
+
+button,
+input,
+textarea {
+  font-family: inherit;
 }
 
 #app {
@@ -175,7 +189,8 @@ body {
 }
 
 .edit-toolbar {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
   gap: 8px;
   padding: 0 14px 10px;
   background: var(--bg);
@@ -187,15 +202,21 @@ body {
 }
 
 .toolbar-btn {
-  flex: 1;
+  width: 100%;
+  min-height: 44px;
   border: none;
   border-radius: 12px;
-  padding: 10px 8px;
+  padding: 10px 6px;
   font-size: 0.85rem;
   font-weight: 600;
+  font-family: var(--font);
   background: var(--card);
   color: var(--text);
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
 }
 
 .toolbar-btn.primary {
@@ -315,7 +336,7 @@ body {
 }
 
 .task-row.sub {
-  grid-template-columns: 40px 1fr;
+  grid-template-columns: 40px 1fr 36px;
   min-height: 34px;
   padding-left: 24px;
   opacity: 0.92;
@@ -446,6 +467,11 @@ body.edit-mode .delete-btn {
   opacity: 1;
 }
 
+body.edit-mode .task-row.sub .check {
+  pointer-events: none;
+  opacity: 0.45;
+}
+
 .icon-btn-spacer {
   width: 40px;
   height: 40px;
@@ -481,30 +507,32 @@ body.edit-mode .delete-btn {
 }
 
 .flame-wrap {
-  filter: drop-shadow(0 8px 24px rgba(255, 149, 0, 0.35));
+  color: var(--accent);
+  filter: drop-shadow(0 8px 24px color-mix(in srgb, var(--accent) 40%, transparent));
   animation: flicker 2.8s ease-in-out infinite;
 }
 
 @keyframes flicker {
-  0%, 100% { transform: scale(1) translateY(0); filter: drop-shadow(0 8px 24px rgba(255, 149, 0, 0.35)); }
-  50% { transform: scale(1.04) translateY(-3px); filter: drop-shadow(0 12px 28px rgba(255, 149, 0, 0.5)); }
+  0%, 100% { transform: scale(1) translateY(0); filter: drop-shadow(0 8px 24px color-mix(in srgb, var(--accent) 40%, transparent)); }
+  50% { transform: scale(1.04) translateY(-3px); filter: drop-shadow(0 12px 28px color-mix(in srgb, var(--accent) 55%, transparent)); }
 }
 
 .streak-count {
   font-size: 2rem;
   font-weight: 800;
-  color: var(--flame);
+  color: var(--accent);
   letter-spacing: -0.03em;
 }
 
 .week-calendar {
   width: min(340px, calc(100% - 40px));
   margin: 8px auto 0;
-  background: #fff;
+  background: var(--card);
   border-radius: 12px;
   padding: 14px 12px 16px;
-  color: #1c1c1e;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
+  color: var(--text);
+  box-shadow: none;
+  border: 1px solid color-mix(in srgb, var(--text) 8%, transparent);
 }
 
 .week-calendar-head {
@@ -515,7 +543,7 @@ body.edit-mode .delete-btn {
   text-align: center;
   font-size: 0.7rem;
   font-weight: 700;
-  color: #8e8e93;
+  color: var(--text-muted);
   letter-spacing: 0.04em;
 }
 
@@ -531,27 +559,27 @@ body.edit-mode .delete-btn {
   width: 28px;
   height: 28px;
   border-radius: 50%;
-  background: #d1d1d6;
+  background: color-mix(in srgb, var(--text-muted) 35%, transparent);
   display: grid;
   place-items: center;
   font-size: 0.65rem;
   font-weight: 700;
   color: transparent;
-  transition: background 0.2s, transform 0.2s;
+  transition: background 0.2s, transform 0.2s, box-shadow 0.2s;
 }
 
 .day-dot.done {
-  background: var(--flame);
-  box-shadow: 0 0 0 3px rgba(255, 149, 0, 0.25);
+  background: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 28%, transparent);
 }
 
 .day-dot.today {
-  outline: 2px solid #1c1c1e;
+  outline: 2px solid var(--text);
   outline-offset: 2px;
 }
 
 .day-dot.missed {
-  background: #aeaeb2;
+  background: color-mix(in srgb, var(--text-muted) 45%, transparent);
 }
 
 /* ===== Modals ===== */
@@ -657,12 +685,14 @@ body.edit-mode .delete-btn {
   padding: 13px;
   font-size: 1rem;
   font-weight: 650;
+  font-family: var(--font);
   cursor: pointer;
 }
 
 .modal-btn.ghost {
-  background: var(--card);
+  background: color-mix(in srgb, var(--text) 14%, var(--bg));
   color: var(--text);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 18%, transparent);
 }
 
 .modal-btn.accent {

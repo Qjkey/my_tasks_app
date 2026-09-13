@@ -60,16 +60,9 @@
 
       <div class="streak-hero">
         <div class="flame-wrap" aria-hidden="true">
-          <svg class="flame-icon" viewBox="0 0 64 80" width="88" height="110">
-            <defs>
-              <linearGradient id="flameGrad" x1="0%" y1="100%" x2="100%" y2="0%">
-                <stop offset="0%" stop-color="#ff6a00" />
-                <stop offset="45%" stop-color="#ff9500" />
-                <stop offset="100%" stop-color="#ffcc33" />
-              </linearGradient>
-            </defs>
-            <path fill="url(#flameGrad)" d="M32 4c2 10-6 16-11 22-6 7-9 13-9 22a20 20 0 0 0 40 0c0-10-4-17-8-23C39 18 35 12 32 4z"/>
-            <path fill="#fff3c4" opacity=".85" d="M32 42c1 4-2 7-4 9-2 2-3 4-3 7a7 7 0 0 0 14 0c0-3-1-5-3-7-2-2-4-5-4-9z"/>
+          <svg class="flame-icon" viewBox="0 0 64 80" width="88" height="110" aria-hidden="true">
+            <path fill="currentColor" d="M32 4c2 10-6 16-11 22-6 7-9 13-9 22a20 20 0 0 0 40 0c0-10-4-17-8-23C39 18 35 12 32 4z"/>
+            <path fill="var(--button-text)" opacity=".35" d="M32 42c1 4-2 7-4 9-2 2-3 4-3 7a7 7 0 0 0 14 0c0-3-1-5-3-7-2-2-4-5-4-9z"/>
           </svg>
         </div>
         <p id="streak-count" class="streak-count">0 дней</p>
