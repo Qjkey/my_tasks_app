@@ -53,9 +53,10 @@ function initTelegram() {
     w.setBackgroundColor(secondary);
   } catch (_) {}
 
-  w.MainButton.setText("Добавить");
-  w.MainButton.show();
-  w.MainButton.onClick(() => openAddModal());
+  // MainButton не используем — «Добавить» в меню редактирования
+  try {
+    w.MainButton.hide();
+  } catch (_) {}
 }
 
 function dateKeyForSelectedDay() {
@@ -194,12 +195,6 @@ function setTab(tab) {
   $("#nav-week").classList.toggle("active", tab === "week");
   $("#nav-streak").classList.toggle("active", tab === "streak");
 
-  const w = tg();
-  if (w?.MainButton) {
-    if (tab === "week" && !state.editMode) w.MainButton.show();
-    else w.MainButton.hide();
-  }
-
   if (tab === "streak") renderStreak();
 }
 
@@ -208,12 +203,45 @@ function toggleEdit(force) {
   document.body.classList.toggle("edit-mode", state.editMode);
   $("#btn-edit").classList.toggle("active", state.editMode);
   $("#edit-toolbar").classList.toggle("hidden", !state.editMode);
-  const w = tg();
-  if (w?.MainButton) {
-    if (state.editMode) w.MainButton.hide();
-    else if (state.tab === "week") w.MainButton.show();
-  }
   renderTasks();
+}
+
+/** Полный цикл анимации нажатия на карточке (не обрывается при отпускании) */
+function playPressAnim(card) {
+  if (!card || card.classList.contains("dragging")) return;
+  card.classList.remove("press-anim");
+  // restart animation
+  void card.offsetWidth;
+  card.classList.add("press-anim");
+  const done = () => {
+    card.classList.remove("press-anim");
+    card.removeEventListener("animationend", done);
+  };
+  card.addEventListener("animationend", done);
+}
+
+/** Обновить галочки/зачёркивание без перерисовки всего списка */
+function refreshDoneUI() {
+  const dateKey = dateKeyForSelectedDay();
+  const tasks = buildDayTasks(state.store, state.selectedDay, dateKey);
+
+  for (const task of tasks) {
+    const card = $(`.task-card[data-id="${task.id}"]`);
+    if (!card) continue;
+    const done = taskComplete(task);
+    const mainCheck = card.querySelector(".task-row:not(.sub) .check");
+    const mainTitle = card.querySelector(".task-row:not(.sub) .task-title");
+    mainCheck?.classList.toggle("done", done);
+    mainTitle?.classList.toggle("done", done);
+
+    for (const s of task.subtasks || []) {
+      const row = card.querySelector(`.task-row.sub[data-sub-id="${s.id}"]`);
+      if (!row) continue;
+      const sd = isDone(s.id);
+      row.querySelector(".check")?.classList.toggle("done", sd);
+      row.querySelector(".task-title")?.classList.toggle("done", sd);
+    }
+  }
 }
 
 async function persist() {
@@ -369,6 +397,7 @@ function bindEvents() {
 
   $("#btn-edit").addEventListener("click", () => toggleEdit());
   $("#btn-done-edit").addEventListener("click", () => toggleEdit(false));
+  $("#btn-add-task").addEventListener("click", () => openAddModal());
   $("#btn-to-streak").addEventListener("click", () => setTab("streak"));
 
   $("#nav-week").addEventListener("click", () => setTab("week"));
@@ -384,12 +413,19 @@ function bindEvents() {
 
     if (state.editMode) return;
 
+    const card = e.target.closest(".task-card");
+
     const expand = e.target.closest("[data-expand]");
     if (expand) {
       const id = expand.dataset.expand;
       if (state.expanded.has(id)) state.expanded.delete(id);
       else state.expanded.add(id);
-      renderTasks();
+      if (card) {
+        playPressAnim(card);
+        card.classList.toggle("expanded", state.expanded.has(id));
+      } else {
+        renderTasks();
+      }
       return;
     }
 
@@ -422,7 +458,8 @@ function bindEvents() {
         state.store.onceDone[root.id] = dateKey;
       }
 
-      renderTasks();
+      if (card) playPressAnim(card);
+      refreshDoneUI();
       persist();
       tg()?.HapticFeedback?.impactOccurred?.("light");
     }

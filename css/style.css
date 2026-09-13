@@ -13,10 +13,10 @@
   --border: rgba(255, 255, 255, 0.06);
   --danger: #ff453a;
   --radius: 10px;
-  --radius-press: 9px;
+  --radius-press: 4px;
   --radius-edge: 20px;
   --safe-bottom: env(safe-area-inset-bottom, 0px);
-  --nav-h: 72px;
+  --nav-h: 64px;
   --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
 }
 
@@ -191,8 +191,8 @@ body {
   flex: 1;
   border: none;
   border-radius: 12px;
-  padding: 10px 12px;
-  font-size: 0.9rem;
+  padding: 10px 8px;
+  font-size: 0.85rem;
   font-weight: 600;
   background: var(--card);
   color: var(--text);
@@ -239,39 +239,52 @@ body {
 }
 
 .task-card {
+  --r-tl: var(--radius);
+  --r-tr: var(--radius);
+  --r-br: var(--radius);
+  --r-bl: var(--radius);
   background: var(--card);
-  border-radius: var(--radius);
-  padding: 4px 0;
-  transition:
-    border-radius 0.22s ease,
-    background 0.15s,
-    box-shadow 0.15s,
-    transform 0.15s;
+  border-radius: var(--r-tl) var(--r-tr) var(--r-br) var(--r-bl);
+  padding: 1px 0;
+  transition: background 0.15s, box-shadow 0.15s, transform 0.15s;
   touch-action: pan-y;
 }
 
 /* первый / последний / средние */
 .task-card:first-child {
-  border-top-left-radius: var(--radius-edge);
-  border-top-right-radius: var(--radius-edge);
-  border-bottom-left-radius: var(--radius);
-  border-bottom-right-radius: var(--radius);
+  --r-tl: var(--radius-edge);
+  --r-tr: var(--radius-edge);
+  --r-br: var(--radius);
+  --r-bl: var(--radius);
 }
 
 .task-card:last-child {
-  border-top-left-radius: var(--radius);
-  border-top-right-radius: var(--radius);
-  border-bottom-left-radius: var(--radius-edge);
-  border-bottom-right-radius: var(--radius-edge);
+  --r-tl: var(--radius);
+  --r-tr: var(--radius);
+  --r-br: var(--radius-edge);
+  --r-bl: var(--radius-edge);
 }
 
 .task-card:first-child:last-child {
-  border-radius: var(--radius-edge);
+  --r-tl: var(--radius-edge);
+  --r-tr: var(--radius-edge);
+  --r-br: var(--radius-edge);
+  --r-bl: var(--radius-edge);
 }
 
-/* анимация нажатия: радиус → 9 */
-.task-card:active:not(.dragging) {
-  border-radius: var(--radius-press) !important;
+/* полный цикл анимации клика: → 4px → обратно */
+.task-card.press-anim {
+  animation: card-press 0.42s ease;
+}
+
+@keyframes card-press {
+  0%,
+  100% {
+    border-radius: var(--r-tl) var(--r-tr) var(--r-br) var(--r-bl);
+  }
+  40% {
+    border-radius: var(--radius-press);
+  }
 }
 
 .task-card.dragging {
@@ -295,23 +308,23 @@ body {
 
 .task-row {
   display: grid;
-  grid-template-columns: 44px 1fr 40px;
+  grid-template-columns: 40px 1fr 36px;
   align-items: center;
-  min-height: 52px;
-  padding: 4px 8px 4px 4px;
+  min-height: 40px;
+  padding: 2px 6px 2px 2px;
   gap: 2px;
 }
 
 .task-row.sub {
-  grid-template-columns: 44px 1fr;
-  min-height: 44px;
-  padding-left: 28px;
+  grid-template-columns: 40px 1fr;
+  min-height: 34px;
+  padding-left: 24px;
   opacity: 0.92;
 }
 
 .check {
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   margin: 0 auto;
   border-radius: 50%;
   border: 2px solid var(--text-dim);
@@ -338,8 +351,8 @@ body {
 }
 
 .task-row.sub .check {
-  width: 22px;
-  height: 22px;
+  width: 20px;
+  height: 20px;
   border-width: 1.5px;
 }
 
@@ -349,7 +362,7 @@ body {
 }
 
 .task-title {
-  font-size: 1.05rem;
+  font-size: 0.98rem;
   font-weight: 500;
   color: var(--text-muted);
   line-height: 1.25;
@@ -368,8 +381,8 @@ body {
 
 .expand-btn,
 .delete-btn {
-  width: 36px;
-  height: 36px;
+  width: 32px;
+  height: 32px;
   border: none;
   background: transparent;
   color: var(--text-muted);
@@ -522,21 +535,22 @@ body.edit-mode .delete-btn {
   background: #aeaeb2;
 }
 
-/* ===== Bottom nav ===== */
+/* ===== Bottom nav — без фона, список виден под табами ===== */
 .bottom-nav {
   position: fixed;
   left: 50%;
-  bottom: calc(12px + var(--safe-bottom));
+  bottom: calc(8px + var(--safe-bottom));
   transform: translateX(-50%);
   width: min(280px, calc(100% - 48px));
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 4px;
-  padding: 6px;
-  background: var(--bg);
+  padding: 4px;
+  background: transparent;
   border-radius: 999px;
   z-index: 40;
   box-shadow: none;
+  pointer-events: none;
 }
 
 .nav-item {
@@ -550,11 +564,13 @@ body.edit-mode .delete-btn {
   padding: 8px 10px;
   border-radius: 999px;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+  pointer-events: auto;
+  transition: color 0.15s, filter 0.15s;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.45));
 }
 
 .nav-item.active {
-  background: var(--nav-active);
+  background: transparent;
   color: var(--text);
 }
 
