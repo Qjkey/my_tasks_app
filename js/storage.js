@@ -1,10 +1,9 @@
 /**
- * Хранилище: Cloudflare KV через /api/data + fallback localStorage.
+ * Хранилище только через Cloudflare KV (/api/data).
+ * Без localStorage.
  */
 
 import { emptyStore, parseTaskCode } from "./parser.js";
-
-const LS_KEY = "planer_store_v1";
 
 function tg() {
   return window.Telegram?.WebApp || null;
@@ -23,29 +22,33 @@ function userQuery() {
   return "?userId=local";
 }
 
+async function apiGet() {
+  const res = await fetch(`/api/data${userQuery()}`, { headers: headers() });
+  if (!res.ok) {
+    throw new Error(`KV read failed: ${res.status}`);
+  }
+  return res.json();
+}
+
+async function apiPut(store) {
+  const res = await fetch(`/api/data${userQuery()}`, {
+    method: "PUT",
+    headers: headers(),
+    body: JSON.stringify(store),
+  });
+  if (!res.ok) {
+    throw new Error(`KV write failed: ${res.status}`);
+  }
+  return res.json();
+}
+
 export async function loadStore() {
-  try {
-    const res = await fetch(`/api/data${userQuery()}`, { headers: headers() });
-    if (res.ok) {
-      const payload = await res.json();
-      if (payload.exists && payload.data) {
-        const data = migrate(payload.data);
-        localStorage.setItem(LS_KEY, JSON.stringify(data));
-        return data;
-      }
-    }
-  } catch (_) {
-    /* offline / no worker */
+  const payload = await apiGet();
+  if (payload.exists && payload.data) {
+    return migrate(payload.data);
   }
 
-  const cached = localStorage.getItem(LS_KEY);
-  if (cached) {
-    try {
-      return migrate(JSON.parse(cached));
-    } catch (_) {}
-  }
-
-  // Первичная загрузка примера
+  // Пустая KV — один раз засеять пример и сохранить в KV
   try {
     const res = await fetch("./tasks.example.txt");
     if (res.ok) {
@@ -64,17 +67,7 @@ export async function loadStore() {
 
 export async function saveStore(store) {
   store.updatedAt = new Date().toISOString();
-  localStorage.setItem(LS_KEY, JSON.stringify(store));
-
-  try {
-    await fetch(`/api/data${userQuery()}`, {
-      method: "PUT",
-      headers: headers(),
-      body: JSON.stringify(store),
-    });
-  } catch (_) {
-    /* keep local */
-  }
+  await apiPut(store);
 }
 
 function migrate(data) {
@@ -95,7 +88,6 @@ export function applyTemplate(store, codeText) {
   const parsed = parseTaskCode(codeText);
   store.template = parsed.template;
   store.days = parsed.days;
-  // сбрасываем порядок по дням недели (не по датам) — шаблон изменился
   for (const key of Object.keys(store.order)) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) delete store.order[key];
   }

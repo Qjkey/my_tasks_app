@@ -1,22 +1,20 @@
 :root {
-  --bg: #1a1d21;
-  --bg-elevated: #25282e;
-  --card: #2c3038;
-  --card-hover: #343842;
-  --text: #f2f2f7;
-  --text-muted: #8e8e93;
-  --text-dim: #636366;
-  --accent: #d4a017;
-  --accent-soft: #c9a227;
+  --bg: var(--tg-theme-secondary-bg-color, #1c1c1e);
+  --bg-elevated: var(--tg-theme-bg-color, #2c2c2e);
+  --card: var(--tg-theme-section-bg-color, #2c2c2e);
+  --text: var(--tg-theme-text-color, #f2f2f7);
+  --text-muted: var(--tg-theme-hint-color, #8e8e93);
+  --text-dim: var(--tg-theme-hint-color, #636366);
+  --accent: var(--tg-theme-button-color, #3390ec);
+  --accent-soft: var(--tg-theme-button-color, #3390ec);
+  --button-text: var(--tg-theme-button-text-color, #ffffff);
   --flame: #ff9500;
-  --flame-dim: #5a4a3a;
-  --nav-bg: #2a2d33;
-  --nav-active: #3a3d45;
+  --nav-active: var(--tg-theme-section-bg-color, rgba(255, 255, 255, 0.08));
   --border: rgba(255, 255, 255, 0.06);
   --danger: #ff453a;
-  --ok: #30d158;
-  --radius: 14px;
-  --radius-sm: 10px;
+  --radius: 10px;
+  --radius-press: 9px;
+  --radius-edge: 20px;
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --nav-h: 72px;
   --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
@@ -49,6 +47,7 @@ body {
   position: relative;
   display: flex;
   flex-direction: column;
+  background: var(--bg);
 }
 
 .tab {
@@ -57,6 +56,7 @@ body {
   flex-direction: column;
   min-height: 0;
   padding-bottom: calc(var(--nav-h) + var(--safe-bottom) + 8px);
+  background: var(--bg);
 }
 
 .tab.active {
@@ -72,6 +72,7 @@ body {
   padding: 12px 14px 8px;
   position: relative;
   z-index: 20;
+  background: var(--bg);
 }
 
 .icon-btn {
@@ -79,7 +80,7 @@ body {
   height: 40px;
   border-radius: 50%;
   border: none;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--card);
   color: var(--text-muted);
   display: grid;
   place-items: center;
@@ -92,7 +93,7 @@ body {
 }
 
 .icon-btn.active {
-  background: rgba(212, 160, 23, 0.2);
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
   color: var(--accent);
 }
 
@@ -109,7 +110,7 @@ body {
   letter-spacing: -0.02em;
   cursor: pointer;
   padding: 8px 12px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius);
 }
 
 .day-selector .chevron {
@@ -129,7 +130,7 @@ body {
   width: min(240px, calc(100% - 48px));
   background: var(--bg-elevated);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: 14px;
   padding: 6px;
   z-index: 30;
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
@@ -155,7 +156,7 @@ body {
 
 .day-menu button:hover,
 .day-menu button:focus-visible {
-  background: rgba(255, 255, 255, 0.06);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
 }
 
 .day-menu button.selected {
@@ -178,6 +179,7 @@ body {
   display: flex;
   gap: 8px;
   padding: 0 14px 10px;
+  background: var(--bg);
   animation: fade 0.2s ease;
 }
 
@@ -199,7 +201,7 @@ body {
 
 .toolbar-btn.primary {
   background: var(--accent);
-  color: #1a1a1a;
+  color: var(--button-text);
 }
 
 @keyframes fade {
@@ -214,8 +216,16 @@ body {
   padding: 4px 14px 20px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 6px;
   -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.task-list::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
 }
 
 .task-list:empty::after {
@@ -232,15 +242,43 @@ body {
   background: var(--card);
   border-radius: var(--radius);
   padding: 4px 0;
-  transition: background 0.15s, box-shadow 0.15s, transform 0.15s;
+  transition:
+    border-radius 0.22s ease,
+    background 0.15s,
+    box-shadow 0.15s,
+    transform 0.15s;
   touch-action: pan-y;
 }
 
+/* первый / последний / средние */
+.task-card:first-child {
+  border-top-left-radius: var(--radius-edge);
+  border-top-right-radius: var(--radius-edge);
+  border-bottom-left-radius: var(--radius);
+  border-bottom-right-radius: var(--radius);
+}
+
+.task-card:last-child {
+  border-top-left-radius: var(--radius);
+  border-top-right-radius: var(--radius);
+  border-bottom-left-radius: var(--radius-edge);
+  border-bottom-right-radius: var(--radius-edge);
+}
+
+.task-card:first-child:last-child {
+  border-radius: var(--radius-edge);
+}
+
+/* анимация нажатия: радиус → 9 */
+.task-card:active:not(.dragging) {
+  border-radius: var(--radius-press) !important;
+}
+
 .task-card.dragging {
-  opacity: 0.85;
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.4);
-  transform: scale(1.02);
+  opacity: 0.9;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
   z-index: 50;
+  border-radius: var(--radius-press) !important;
 }
 
 .task-card.drop-target {
@@ -294,7 +332,7 @@ body {
   content: "";
   width: 7px;
   height: 12px;
-  border: solid #1a1a1a;
+  border: solid var(--button-text);
   border-width: 0 2.5px 2.5px 0;
   transform: rotate(45deg) translate(-1px, -1px);
 }
@@ -321,13 +359,15 @@ body {
 }
 
 .task-title.done {
-  color: var(--accent-soft);
+  color: var(--accent);
   text-decoration: line-through;
   text-decoration-color: var(--accent);
   text-decoration-thickness: 2px;
+  opacity: 0.85;
 }
 
-.expand-btn {
+.expand-btn,
+.delete-btn {
   width: 36px;
   height: 36px;
   border: none;
@@ -337,6 +377,14 @@ body {
   place-items: center;
   cursor: pointer;
   border-radius: 8px;
+}
+
+.delete-btn {
+  color: var(--danger);
+}
+
+.delete-btn:active {
+  transform: scale(0.9);
 }
 
 .expand-btn svg {
@@ -371,19 +419,19 @@ body.edit-mode .task-card:active {
   cursor: grabbing;
 }
 
-body.edit-mode .check,
+body.edit-mode .check {
+  pointer-events: none;
+  opacity: 0.45;
+}
+
 body.edit-mode .expand-btn {
   pointer-events: none;
   opacity: 0.45;
 }
 
-.ghost-slot {
-  height: 56px;
-  border-radius: var(--radius);
-  border: 2px dashed rgba(212, 160, 23, 0.45);
-  background: rgba(212, 160, 23, 0.08);
-  margin: 0;
-  transition: height 0.15s;
+body.edit-mode .delete-btn {
+  pointer-events: auto;
+  opacity: 1;
 }
 
 /* ===== Streak tab ===== */
@@ -485,10 +533,10 @@ body.edit-mode .expand-btn {
   grid-template-columns: 1fr 1fr;
   gap: 4px;
   padding: 6px;
-  background: var(--nav-bg);
+  background: var(--bg);
   border-radius: 999px;
   z-index: 40;
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.4);
+  box-shadow: none;
 }
 
 .nav-item {
@@ -623,7 +671,7 @@ body.edit-mode .expand-btn {
 }
 
 .modal-input:focus {
-  box-shadow: 0 0 0 2px rgba(212, 160, 23, 0.45);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent);
 }
 
 .code-area {
@@ -632,8 +680,8 @@ body.edit-mode .expand-btn {
   flex: 1;
   border: none;
   border-radius: 12px;
-  background: #121417;
-  color: #e8e8ed;
+  background: var(--bg);
+  color: var(--text);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.8rem;
   line-height: 1.45;
@@ -665,10 +713,9 @@ body.edit-mode .expand-btn {
 
 .modal-btn.accent {
   background: var(--accent);
-  color: #1a1a1a;
+  color: var(--button-text);
 }
 
-/* Telegram MainButton space hint */
 body.tg-expand #app {
   min-height: 100dvh;
 }

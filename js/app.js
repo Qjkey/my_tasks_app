@@ -12,10 +12,19 @@ import { enableDragDrop } from "./dragdrop.js";
 
 const MONTHS_EN = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
 
+const DELETE_ICON = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+  <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+  <line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>
+</svg>`;
+
+const CHEVRON_ICON = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5">
+  <polyline points="6 9 12 15 18 9"></polyline>
+</svg>`;
+
 const state = {
   store: null,
   selectedDay: dayNameFromDate(new Date()),
-  viewDateKey: toDateKey(new Date()), // для completions привязка к «сегодня» если выбран текущий weekday
+  viewDateKey: toDateKey(new Date()),
   editMode: false,
   expanded: new Set(),
   tab: "week",
@@ -34,30 +43,26 @@ function initTelegram() {
   w.ready();
   w.expand();
   document.body.classList.add("tg-expand");
+
+  const secondary =
+    w.themeParams?.secondary_bg_color ||
+    getComputedStyle(document.documentElement).getPropertyValue("--tg-theme-secondary-bg-color").trim() ||
+    "#1a1d21";
   try {
-    w.setHeaderColor("#1a1d21");
-    w.setBackgroundColor("#1a1d21");
+    w.setHeaderColor(secondary);
+    w.setBackgroundColor(secondary);
   } catch (_) {}
 
-  // Кнопка «Добавить»
   w.MainButton.setText("Добавить");
   w.MainButton.show();
   w.MainButton.onClick(() => openAddModal());
-
-  if (w.themeParams?.bg_color) {
-    // оставляем наш тёмный дизайн
-  }
 }
 
-/** Если выбран день недели = сегодня → пишем completions на сегодняшнюю дату.
- *  Иначе — на ближайшую/текущую дату этого weekday в этой неделе (для демо).
- */
 function dateKeyForSelectedDay() {
   const today = new Date();
   const todayName = dayNameFromDate(today);
   if (state.selectedDay === todayName) return toDateKey(today);
 
-  // дата выбранного дня в текущей неделе (пн–вс)
   const jsToday = today.getDay();
   const todayIdx = jsToday === 0 ? 6 : jsToday - 1;
   const wantIdx = DAYS.indexOf(state.selectedDay);
@@ -95,6 +100,16 @@ function renderDayMenu() {
   ).join("");
 }
 
+function trailingAction(task, hasSubs) {
+  if (state.editMode) {
+    return `<button type="button" class="delete-btn" data-delete="${task.id}" aria-label="Удалить">${DELETE_ICON}</button>`;
+  }
+  if (hasSubs) {
+    return `<button type="button" class="expand-btn" data-expand="${task.id}" aria-label="Подзадачи">${CHEVRON_ICON}</button>`;
+  }
+  return `<span></span>`;
+}
+
 function renderTasks() {
   const list = $("#task-list");
   const dateKey = dateKeyForSelectedDay();
@@ -107,13 +122,6 @@ function renderTasks() {
       const hasSubs = task.subtasks?.length > 0;
       const expanded = state.expanded.has(task.id);
       const done = taskComplete(task);
-      const chevron = hasSubs
-        ? `<button type="button" class="expand-btn" data-expand="${task.id}" aria-label="Подзадачи">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5">
-              <polyline points="6 9 12 15 18 9"></polyline>
-            </svg>
-          </button>`
-        : `<span></span>`;
 
       const subs = hasSubs
         ? `<div class="subtasks"><div class="subtasks-inner">
@@ -132,7 +140,7 @@ function renderTasks() {
         <div class="task-row">
           <button type="button" class="check ${done ? "done" : ""}" data-toggle="${task.id}" data-parent-toggle="${hasSubs ? "1" : ""}" aria-label="Готово"></button>
           <span class="task-title ${done ? "done" : ""}">${escapeHtml(task.title)}</span>
-          ${chevron}
+          ${trailingAction(task, hasSubs)}
         </div>
         ${subs}
       </article>`;
@@ -188,7 +196,7 @@ function setTab(tab) {
 
   const w = tg();
   if (w?.MainButton) {
-    if (tab === "week") w.MainButton.show();
+    if (tab === "week" && !state.editMode) w.MainButton.show();
     else w.MainButton.hide();
   }
 
@@ -205,11 +213,17 @@ function toggleEdit(force) {
     if (state.editMode) w.MainButton.hide();
     else if (state.tab === "week") w.MainButton.show();
   }
+  renderTasks();
 }
 
 async function persist() {
   evaluateStreak(state.store, new Date());
-  await saveStore(state.store);
+  try {
+    await saveStore(state.store);
+  } catch (err) {
+    console.error(err);
+    tg()?.showAlert?.("Не удалось сохранить в KV. Проверьте привязку PLANER_KV.");
+  }
   if (state.tab === "streak") renderStreak();
 }
 
@@ -225,8 +239,6 @@ function openAddModal() {
   $("#add-task-input").value = "";
   openModal("modal-add");
   setTimeout(() => $("#add-task-input").focus(), 50);
-
-  // Если доступен native prompt — можно как fallback, но UI-модалка надёжнее в TMA
 }
 
 function addTask(title) {
@@ -243,12 +255,35 @@ function addTask(title) {
   };
   state.store.extraTasks[dateKey].unshift(task);
 
-  // обновить order: новый id в начало
   const tasks = buildDayTasks(state.store, state.selectedDay, dateKey);
   state.store.order[dateKey] = tasks.map((t) => t.id);
 
   renderTasks();
   persist();
+}
+
+function deleteTask(taskId) {
+  const dateKey = dateKeyForSelectedDay();
+  const dayName = state.selectedDay;
+  const tasks = buildDayTasks(state.store, dayName, dateKey);
+  const task = tasks.find((t) => t.id === taskId);
+  if (!task) return;
+
+  // убрать отметки
+  const map = doneMap();
+  delete map[taskId];
+  for (const s of task.subtasks || []) delete map[s.id];
+  delete state.store.onceDone[taskId];
+
+  removeTaskFromSources(taskId, dateKey, dayName);
+  state.expanded.delete(taskId);
+
+  const remaining = buildDayTasks(state.store, dayName, dateKey);
+  state.store.order[dateKey] = remaining.map((t) => t.id);
+
+  renderTasks();
+  persist();
+  tg()?.HapticFeedback?.impactOccurred?.("medium");
 }
 
 function handleReorder({ fromId, toId, mode }) {
@@ -265,12 +300,10 @@ function handleReorder({ fromId, toId, mode }) {
     const parent = tasks.find((t) => t.id === toId);
     if (!parent) return;
     if (!parent.subtasks) parent.subtasks = [];
-    // подзадача наследует «статус списка» родителя через принадлежность к нему
     parent.subtasks.push({ id: moved.id, title: moved.title });
     for (const s of moved.subtasks || []) parent.subtasks.push(s);
     removeTaskFromSources(fromId, dateKey, dayName);
     syncParentSubtasks(parent, dateKey, dayName);
-    // порядок корня без moved
     state.store.order[dateKey] = tasks.map((t) => t.id);
   } else {
     let insertAt = tasks.findIndex((t) => t.id === toId);
@@ -279,7 +312,6 @@ function handleReorder({ fromId, toId, mode }) {
     state.store.order[dateKey] = tasks.map((t) => t.id);
   }
 
-  // авто-раскрыть родителя при drop into
   if (mode === "into") state.expanded.add(toId);
 
   renderTasks();
@@ -299,7 +331,6 @@ function removeTaskFromSources(taskId, dateKey, dayName) {
 }
 
 function syncParentSubtasks(parent, dateKey, dayName) {
-  // обновить в days или extra
   const extras = state.store.extraTasks[dateKey] || [];
   const ei = extras.findIndex((t) => t.id === parent.id);
   if (ei >= 0) {
@@ -344,6 +375,13 @@ function bindEvents() {
   $("#nav-streak").addEventListener("click", () => setTab("streak"));
 
   $("#task-list").addEventListener("click", (e) => {
+    const del = e.target.closest("[data-delete]");
+    if (del) {
+      e.stopPropagation();
+      deleteTask(del.dataset.delete);
+      return;
+    }
+
     if (state.editMode) return;
 
     const expand = e.target.closest("[data-expand]");
@@ -369,7 +407,6 @@ function bindEvents() {
         setDone(task.id, next);
       } else {
         setDone(id, !isDone(id));
-        // синхронизация родителя
         const parentRow = toggle.closest("[data-parent]");
         if (parentRow) {
           const parentId = parentRow.dataset.parent;
@@ -378,9 +415,9 @@ function bindEvents() {
         }
       }
 
-      // once: если выполнена целиком — пометить onceDone (исчезнет в следующие недели? 
-      // по ТЗ «один раз» — после выполнения в этот день больше не нужна в будущем)
-      const root = tasks.find((t) => t.id === id) || tasks.find((t) => t.subtasks?.some((s) => s.id === id));
+      const root =
+        tasks.find((t) => t.id === id) ||
+        tasks.find((t) => t.subtasks?.some((s) => s.id === id));
       if (root?.kind === "once" && taskComplete(root)) {
         state.store.onceDone[root.id] = dateKey;
       }
@@ -393,7 +430,6 @@ function bindEvents() {
 
   enableDragDrop($("#task-list"), { onReorder: handleReorder });
 
-  // Modals
   $$("[data-close]").forEach((el) => {
     el.addEventListener("click", () => closeModal(el.dataset.close));
   });
@@ -432,9 +468,20 @@ async function boot() {
   renderDayMenu();
   bindEvents();
 
-  state.store = await loadStore();
+  try {
+    state.store = await loadStore();
+  } catch (err) {
+    console.error(err);
+    state.store = (await import("./parser.js")).emptyStore();
+    tg()?.showAlert?.(
+      "Не удалось загрузить данные из KV. Проверьте binding PLANER_KV и передеплойте сайт."
+    );
+  }
+
   evaluateStreak(state.store, new Date());
-  await saveStore(state.store);
+  try {
+    await saveStore(state.store);
+  } catch (_) {}
 
   state.selectedDay = dayNameFromDate(new Date());
   renderDayMenu();
