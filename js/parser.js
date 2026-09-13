@@ -178,7 +178,10 @@ export function buildDayTasks(store, dayName, dateKey) {
   let list = templateTasks
     .filter((t) => {
       if (t.kind !== "once") return true;
-      return !onceDone[t.id];
+      const doneOn = onceDone[t.id];
+      if (!doneOn) return true;
+      // Показываем в день выполнения (как выполненную), скрываем только в следующие дни
+      return doneOn === dateKey;
     })
     .map((t) => ({
       ...t,
@@ -222,6 +225,9 @@ export function emptyStore() {
       count: 0,
       lastSuccessDate: null,
       history: {}, // { [dateKey]: true|false }
+    },
+    meta: {
+      mondayResetWeek: null,
     },
     updatedAt: null,
   };

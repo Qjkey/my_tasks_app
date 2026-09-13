@@ -81,6 +81,7 @@ function migrate(data) {
     extraTasks: data.extraTasks || {},
     order: data.order || {},
     streak: { ...base.streak, ...(data.streak || {}) },
+    meta: { ...base.meta, ...(data.meta || {}) },
   };
 }
 

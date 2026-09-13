@@ -7,10 +7,8 @@ import {
   buildDayTasks,
 } from "./parser.js";
 import { loadStore, saveStore, applyTemplate } from "./storage.js";
-import { evaluateStreak, weekStatus, pluralDays } from "./streak.js";
+import { evaluateStreak, weekStatus, pluralDays, applyMondayWeekReset } from "./streak.js";
 import { enableDragDrop } from "./dragdrop.js";
-
-const MONTHS_EN = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
 
 const DELETE_ICON = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
   <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
@@ -160,12 +158,16 @@ function escapeHtml(s) {
 function renderStreak() {
   evaluateStreak(state.store, new Date());
   const streak = state.store.streak;
-  $("#streak-count").textContent = pluralDays(streak.count || 0);
+  const countEl = $("#streak-count");
+  if (countEl) countEl.textContent = pluralDays(streak.count || 0);
 
   const head = $("#week-calendar-head");
+  const row = $("#week-calendar-row");
+  if (!head || !row) return;
+
   head.innerHTML = DAY_SHORT.map((d) => `<span>${d}</span>`).join("");
 
-  const row = $("#week-calendar-row");
+  const todayKey = toDateKey(new Date());
   const days = weekStatus(state.store, new Date());
   row.innerHTML = days
     .map((d) => {
@@ -173,7 +175,7 @@ function renderStreak() {
         "day-dot",
         d.status === "done" ? "done" : "",
         d.status === "missed" ? "missed" : "",
-        d.status === "today" ? "today" : "",
+        d.key === todayKey ? "today" : "",
       ]
         .filter(Boolean)
         .join(" ");
@@ -182,19 +184,10 @@ function renderStreak() {
     .join("");
 }
 
-function renderNavDate() {
-  const now = new Date();
-  $("#nav-cal-month").textContent = MONTHS_EN[now.getMonth()];
-  $("#nav-cal-day").textContent = String(now.getDate());
-}
-
 function setTab(tab) {
   state.tab = tab;
   $("#tab-week").classList.toggle("active", tab === "week");
   $("#tab-streak").classList.toggle("active", tab === "streak");
-  $("#nav-week").classList.toggle("active", tab === "week");
-  $("#nav-streak").classList.toggle("active", tab === "streak");
-
   if (tab === "streak") renderStreak();
 }
 
@@ -245,14 +238,20 @@ function refreshDoneUI() {
 }
 
 async function persist() {
+  const before = state.store.streak?.count || 0;
   evaluateStreak(state.store, new Date());
+  const after = state.store.streak?.count || 0;
   try {
     await saveStore(state.store);
   } catch (err) {
     console.error(err);
     tg()?.showAlert?.("Не удалось сохранить в KV. Проверьте привязку PLANER_KV.");
   }
-  if (state.tab === "streak") renderStreak();
+  // обновляем огонёк сразу (даже если вкладка не открыта)
+  renderStreak();
+  if (after > before) {
+    tg()?.HapticFeedback?.notificationOccurred?.("success");
+  }
 }
 
 function openModal(id) {
@@ -399,9 +398,7 @@ function bindEvents() {
   $("#btn-done-edit").addEventListener("click", () => toggleEdit(false));
   $("#btn-add-task").addEventListener("click", () => openAddModal());
   $("#btn-to-streak").addEventListener("click", () => setTab("streak"));
-
-  $("#nav-week").addEventListener("click", () => setTab("week"));
-  $("#nav-streak").addEventListener("click", () => setTab("streak"));
+  $("#btn-back-week").addEventListener("click", () => setTab("week"));
 
   $("#task-list").addEventListener("click", (e) => {
     const del = e.target.closest("[data-delete]");
@@ -501,7 +498,6 @@ function bindEvents() {
 
 async function boot() {
   initTelegram();
-  renderNavDate();
   renderDayMenu();
   bindEvents();
 
@@ -515,6 +511,8 @@ async function boot() {
     );
   }
 
+  // Первый запуск в понедельник — сброс галочек прошлых дней
+  applyMondayWeekReset(state.store, new Date());
   evaluateStreak(state.store, new Date());
   try {
     await saveStore(state.store);

@@ -48,6 +48,16 @@
 
     <!-- ===== Огонёк ===== -->
     <section id="tab-streak" class="tab" aria-label="Огонёк">
+      <header class="top-bar streak-top">
+        <button type="button" id="btn-back-week" class="icon-btn" title="Назад" aria-label="Назад">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="15 18 9 12 15 6" />
+          </svg>
+        </button>
+        <span class="streak-title">Огонёк</span>
+        <span class="icon-btn-spacer" aria-hidden="true"></span>
+      </header>
+
       <div class="streak-hero">
         <div class="flame-wrap" aria-hidden="true">
           <svg class="flame-icon" viewBox="0 0 64 80" width="88" height="110">
@@ -70,21 +80,6 @@
         <div class="week-calendar-row" id="week-calendar-row"></div>
       </div>
     </section>
-
-    <!-- ===== Нижняя навигация ===== -->
-    <nav class="bottom-nav" aria-label="Вкладки">
-      <button type="button" class="nav-item active" data-tab="week" id="nav-week">
-        <span class="nav-icon calendar-icon" id="nav-cal-icon">
-          <span class="cal-month" id="nav-cal-month">SEP</span>
-          <span class="cal-day" id="nav-cal-day">12</span>
-        </span>
-        <span class="nav-label">Неделя</span>
-      </button>
-      <button type="button" class="nav-item" data-tab="streak" id="nav-streak">
-        <span class="nav-icon flame-nav" aria-hidden="true">🔥</span>
-        <span class="nav-label">Огонёк</span>
-      </button>
-    </nav>
   </div>
 
   <!-- Модалка добавления задачи (TMA-style) -->

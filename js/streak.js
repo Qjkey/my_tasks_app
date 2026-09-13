@@ -4,9 +4,10 @@
  * В зачёт идут daily, weekly и once (если есть на день).
  * Родитель с подзадачами — выполнен, когда выполнены все подзадачи.
  *
- * При открытии в новый день: если вчерашние обязательные задачи
- * не закрыты → счётчик сбрасывается в 0.
- * Если день закрыт полностью → +1 (один раз за дату).
+ * Огонёк +1 сразу в тот же день, как только все обязательные задачи закрыты.
+ * При открытии в новый день: если вчера не закрыт → счётчик = 0.
+ *
+ * В первый запуск в понедельник новой недели — галочки прошлых дней сбрасываются.
  */
 
 import {
@@ -41,7 +42,48 @@ export function isDayFullyDone(store, dateKey) {
 }
 
 /**
- * Пересчёт серии. Идемпотентен для одной и той же даты.
+ * Первый запуск приложения в понедельник новой недели:
+ * все выполнения за прошлые дни сбрасываются (становятся невыполненными).
+ * Срабатывает один раз на неделю (ключ mondayResetWeek).
+ */
+export function applyMondayWeekReset(store, today = new Date()) {
+  if (!store.meta) store.meta = {};
+
+  const todayName = dayNameFromDate(today);
+  if (todayName !== "понедельник") return false;
+
+  const weekKey = toDateKey(startOfWeek(today));
+  if (store.meta.mondayResetWeek === weekKey) return false;
+
+  const todayKey = toDateKey(today);
+
+  for (const key of Object.keys(store.completions || {})) {
+    if (key < todayKey) {
+      delete store.completions[key];
+    }
+  }
+
+  for (const [taskId, doneOn] of Object.entries(store.onceDone || {})) {
+    if (doneOn < todayKey) {
+      delete store.onceDone[taskId];
+    }
+  }
+
+  // история огонька за прошлые дни — тоже сброс отметок недели
+  if (store.streak?.history) {
+    for (const key of Object.keys(store.streak.history)) {
+      if (key < todayKey) {
+        delete store.streak.history[key];
+      }
+    }
+  }
+
+  store.meta.mondayResetWeek = weekKey;
+  return true;
+}
+
+/**
+ * Пересчёт серии. +1 в тот же день при полном закрытии.
  */
 export function evaluateStreak(store, today = new Date()) {
   if (!store.streak) {
@@ -52,51 +94,48 @@ export function evaluateStreak(store, today = new Date()) {
   const todayKey = toDateKey(today);
   const yesterdayKey = toDateKey(addDays(today, -1));
 
-  // --- Вчера: фиксация и возможный сброс ---
+  // --- Вчера: если не закрыт и уже новый день → сброс серии ---
   const yRequired = requiredTasks(store, yesterdayKey);
   if (yRequired.length) {
     const yDone = isDayFullyDone(store, yesterdayKey);
     store.streak.history[yesterdayKey] = yDone;
 
     if (!yDone) {
-      // Новый день начался, вчера не закрыт → полный сброс
       store.streak.count = 0;
-      if (store.streak.lastSuccessDate === yesterdayKey) {
-        store.streak.lastSuccessDate = null;
-      }
-      // Если последний успех был ещё раньше — серия уже мертва
       if (
-        store.streak.lastSuccessDate &&
-        store.streak.lastSuccessDate < yesterdayKey
+        !store.streak.lastSuccessDate ||
+        store.streak.lastSuccessDate <= yesterdayKey
       ) {
-        store.streak.lastSuccessDate = null;
+        // серия прервана; сегодняшний успех начнёт с 1
+        if (store.streak.lastSuccessDate !== todayKey) {
+          store.streak.lastSuccessDate = null;
+        }
       }
     }
   }
 
-  // --- Сегодня ---
+  // --- Сегодня: сразу +1 при полном выполнении ---
   const tDone = isDayFullyDone(store, todayKey);
-  const wasTodaySuccess = store.streak.history[todayKey] === true;
+  const alreadyCounted = store.streak.lastSuccessDate === todayKey;
 
   if (tDone) {
     store.streak.history[todayKey] = true;
-    if (!wasTodaySuccess && store.streak.lastSuccessDate !== todayKey) {
+    if (!alreadyCounted) {
       const continued =
         store.streak.lastSuccessDate === yesterdayKey ||
         store.streak.count === 0 ||
         !store.streak.lastSuccessDate;
-      store.streak.count = continued
-        ? (store.streak.count || 0) + 1
-        : 1;
+      store.streak.count = continued ? (store.streak.count || 0) + 1 : 1;
       store.streak.lastSuccessDate = todayKey;
     }
-  } else if (wasTodaySuccess) {
-    // Сняли галочки после зачёта дня
-    store.streak.history[todayKey] = false;
-    if (store.streak.lastSuccessDate === todayKey) {
-      store.streak.count = Math.max(0, (store.streak.count || 1) - 1);
-      store.streak.lastSuccessDate =
-        store.streak.history[yesterdayKey] === true ? yesterdayKey : null;
+  } else {
+    if (store.streak.history[todayKey] === true || alreadyCounted) {
+      store.streak.history[todayKey] = false;
+      if (store.streak.lastSuccessDate === todayKey) {
+        store.streak.count = Math.max(0, (store.streak.count || 1) - 1);
+        store.streak.lastSuccessDate =
+          store.streak.history[yesterdayKey] === true ? yesterdayKey : null;
+      }
     }
   }
 
