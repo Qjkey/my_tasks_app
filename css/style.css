@@ -622,6 +622,13 @@ body.edit-mode .task-row.sub .check {
   min-width: 40px;
 }
 
+.list-badge-inline {
+  flex-shrink: 0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--accent);
+}
+
 .sub-dot {
   width: 6px;
   height: 6px;

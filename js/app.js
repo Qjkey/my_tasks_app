@@ -107,11 +107,26 @@ function doneMap() {
   return state.store.completions[key];
 }
 
+/** Пункты адаптивных списков — общие для всех дней и вкладки «Списки» */
+function isAdaptiveId(id) {
+  const s = String(id);
+  return s.startsWith("alist_") || s.startsWith("als_");
+}
+
 function isDone(id) {
+  if (isAdaptiveId(id)) {
+    return !!state.store.listCompletions?.[id];
+  }
   return !!doneMap()[id];
 }
 
 function setDone(id, value) {
+  if (isAdaptiveId(id)) {
+    if (!state.store.listCompletions) state.store.listCompletions = {};
+    if (value) state.store.listCompletions[id] = true;
+    else delete state.store.listCompletions[id];
+    return;
+  }
   const map = doneMap();
   if (value) map[id] = true;
   else delete map[id];
@@ -278,29 +293,50 @@ function renderLists() {
 
   root.innerHTML = lists
     .map((list) => {
-      const open = state.expanded.has(`listview_${list.listId}`);
-      return `<article class="task-card ${open ? "expanded" : ""}" data-list-view="${list.listId}">
+      const taskId = `alist_${list.listId}`;
+      const open = state.expanded.has(taskId) || state.expanded.has(`listview_${list.listId}`);
+      const subs = list.subtasks || [];
+      const done =
+        !!isDone(taskId) ||
+        (subs.length > 0 && subs.every((s) => isDone(s.id)));
+
+      return `<article class="task-card ${open ? "expanded" : ""}" data-id="${taskId}" data-kind="adaptive" data-list-id="${list.listId}">
         <div class="task-row">
-          <span class="list-badge">[{${list.listId}}]</span>
+          <button type="button" class="check ${done ? "done" : ""}" data-toggle="${taskId}" data-parent-toggle="1" aria-label="Готово"></button>
           <div class="title-wrap">
-            <span class="task-title">${escapeHtml(list.title)}</span>
+            <span class="list-badge-inline">[{${list.listId}}]</span>
+            <span class="task-title ${done ? "done" : ""}">${escapeHtml(list.title)}</span>
           </div>
-          <button type="button" class="expand-btn" data-expand-list="${list.listId}" aria-label="Пункты">${CHEVRON_ICON}</button>
+          <button type="button" class="expand-btn" data-expand="${taskId}" aria-label="Пункты">${CHEVRON_ICON}</button>
         </div>
         <div class="subtasks"><div class="subtasks-inner">
-          ${(list.subtasks || [])
-            .map(
-              (s) => `<div class="task-row sub">
-                <span class="sub-dot"></span>
-                <span class="task-title">${escapeHtml(s.title)}</span>
-                <span class="row-spacer"></span>
-              </div>`
-            )
-            .join("") || `<p class="lists-empty soft">Пустой список</p>`}
+          ${
+            subs
+              .map(
+                (s) => `<div class="task-row sub" data-sub-id="${s.id}" data-parent="${taskId}">
+                  <button type="button" class="check ${isDone(s.id) ? "done" : ""}" data-toggle="${s.id}" aria-label="Готово"></button>
+                  <div class="title-wrap">
+                    <span class="task-title ${isDone(s.id) ? "done" : ""}">${escapeHtml(s.title)}</span>
+                  </div>
+                  <span class="row-spacer"></span>
+                </div>`
+              )
+              .join("") || `<p class="lists-empty soft">Пустой список</p>`
+          }
         </div></div>
       </article>`;
     })
     .join("");
+}
+
+function listsAsTasks() {
+  return Object.values(state.store.lists || {}).map((list) => ({
+    id: `alist_${list.listId}`,
+    title: list.title,
+    kind: "adaptive",
+    listId: list.listId,
+    subtasks: (list.subtasks || []).map((s) => ({ ...s })),
+  }));
 }
 
 function toggleEdit(force) {
@@ -639,18 +675,56 @@ function bindEvents() {
 
       if (card) playPressAnim(card);
       refreshDoneUI();
+      // синхрон с вкладкой списков (адаптивные — глобальные)
+      if (isAdaptiveId(id) || root?.kind === "adaptive") {
+        if (state.tab === "lists") renderLists();
+      }
       persist();
       tg()?.HapticFeedback?.impactOccurred?.("light");
     }
   });
 
   $("#lists-root")?.addEventListener("click", (e) => {
-    const exp = e.target.closest("[data-expand-list]");
-    if (!exp) return;
-    const id = `listview_${exp.dataset.expandList}`;
-    if (state.expanded.has(id)) state.expanded.delete(id);
-    else state.expanded.add(id);
+    const expand = e.target.closest("[data-expand]");
+    if (expand) {
+      const id = expand.dataset.expand;
+      if (state.expanded.has(id)) state.expanded.delete(id);
+      else state.expanded.add(id);
+      const card = e.target.closest(".task-card");
+      if (card) card.classList.toggle("expanded", state.expanded.has(id));
+      else renderLists();
+      return;
+    }
+
+    const toggle = e.target.closest("[data-toggle]");
+    if (!toggle) return;
+
+    const id = toggle.dataset.toggle;
+    const parentToggle = toggle.dataset.parentToggle === "1";
+    const tasks = listsAsTasks();
+    const task = tasks.find((t) => t.id === id);
+    const card = e.target.closest(".task-card");
+
+    if (parentToggle && task?.subtasks?.length) {
+      const next = !taskComplete(task);
+      for (const s of task.subtasks) setDone(s.id, next);
+      setDone(task.id, next);
+    } else {
+      setDone(id, !isDone(id));
+      const parentRow = toggle.closest("[data-parent]");
+      if (parentRow) {
+        const parentId = parentRow.dataset.parent;
+        const parent = tasks.find((t) => t.id === parentId);
+        if (parent) setDone(parent.id, taskComplete(parent));
+      }
+    }
+
+    if (card) playPressAnim(card);
     renderLists();
+    // обновить день, если там закреплён этот список
+    if (state.tab === "week") refreshDoneUI();
+    persist();
+    tg()?.HapticFeedback?.impactOccurred?.("light");
   });
 
   enableDragDrop($("#task-list"), { onReorder: handleReorder });

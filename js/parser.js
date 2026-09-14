@@ -328,6 +328,7 @@ export function emptyStore() {
     days: Object.fromEntries(DAYS.map((d) => [d, []])),
     lists: {},
     completions: {},
+    listCompletions: {},
     onceDone: {},
     extraTasks: {},
     order: {},

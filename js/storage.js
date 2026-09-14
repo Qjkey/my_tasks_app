@@ -84,6 +84,7 @@ function migrate(data) {
     days: { ...base.days, ...(data.days || {}) },
     lists: { ...(data.lists || {}) },
     completions: data.completions || {},
+    listCompletions: data.listCompletions || {},
     onceDone: data.onceDone || {},
     extraTasks: data.extraTasks || {},
     order,
