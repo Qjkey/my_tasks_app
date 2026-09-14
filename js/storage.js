@@ -72,6 +72,11 @@ export async function saveStore(store) {
 
 function migrate(data) {
   const base = emptyStore();
+  const order = { ...(data.order || {}) };
+  // убрать порядок по имени дня — он путал недели
+  for (const key of Object.keys(order)) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) delete order[key];
+  }
   return {
     ...base,
     ...data,
@@ -79,9 +84,9 @@ function migrate(data) {
     completions: data.completions || {},
     onceDone: data.onceDone || {},
     extraTasks: data.extraTasks || {},
-    order: data.order || {},
+    order,
     streak: { ...base.streak, ...(data.streak || {}) },
-    meta: { ...base.meta, ...(data.meta || {}) },
+    meta: { ...(data.meta || {}) },
   };
 }
 

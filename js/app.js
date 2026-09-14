@@ -1,13 +1,14 @@
 import {
   DAYS,
   DAY_SHORT,
+  DESC_MAX,
   capitalize,
   dayNameFromDate,
   toDateKey,
   buildDayTasks,
 } from "./parser.js";
 import { loadStore, saveStore, applyTemplate } from "./storage.js";
-import { evaluateStreak, weekStatus, pluralDays, applyMondayWeekReset } from "./streak.js";
+import { evaluateStreak, weekStatus, pluralDays } from "./streak.js";
 import { enableDragDrop } from "./dragdrop.js";
 
 const DELETE_ICON = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
@@ -19,12 +20,16 @@ const CHEVRON_ICON = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none
   <polyline points="6 9 12 15 18 9"></polyline>
 </svg>`;
 
+const INFO_ICON = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2">
+  <circle cx="12" cy="12" r="9"/><line x1="12" y1="10" x2="12" y2="16"/><circle cx="12" cy="7" r="0.8" fill="currentColor" stroke="none"/>
+</svg>`;
+
 const state = {
   store: null,
   selectedDay: dayNameFromDate(new Date()),
-  viewDateKey: toDateKey(new Date()),
   editMode: false,
   expanded: new Set(),
+  descOpen: new Set(),
   tab: "week",
 };
 
@@ -51,12 +56,31 @@ function initTelegram() {
     w.setBackgroundColor(secondary);
   } catch (_) {}
 
-  // MainButton не используем — «Добавить» в меню редактирования
   try {
     w.MainButton.hide();
   } catch (_) {}
+
+  try {
+    w.BackButton.hide();
+    w.BackButton.onClick(() => setTab("week"));
+  } catch (_) {}
 }
 
+function syncTelegramChrome() {
+  const w = tg();
+  if (!w) return;
+  try {
+    if (state.tab === "streak") {
+      w.BackButton.show();
+      document.title = "Огонёк";
+    } else {
+      w.BackButton.hide();
+      document.title = "Планер";
+    }
+  } catch (_) {}
+}
+
+/** Только календарная дата выбранного дня в ТЕКУЩЕЙ неделе (пн–вс). */
 function dateKeyForSelectedDay() {
   const today = new Date();
   const todayName = dayNameFromDate(today);
@@ -102,6 +126,19 @@ function renderDayMenu() {
   ).join("");
 }
 
+function infoBtn(id, hasDesc) {
+  if (!hasDesc || state.editMode) return "";
+  return `<button type="button" class="info-btn" data-desc-toggle="${id}" aria-label="Описание">${INFO_ICON}</button>`;
+}
+
+function descBlock(id, text) {
+  if (!text) return "";
+  const open = state.descOpen.has(id);
+  return `<div class="task-desc ${open ? "open" : ""}" data-desc-for="${id}">
+    <div class="task-desc-inner">${escapeHtml(text)}</div>
+  </div>`;
+}
+
 function trailingAction(task, hasSubs) {
   if (state.editMode) {
     return `<button type="button" class="delete-btn" data-delete="${task.id}" aria-label="Удалить">${DELETE_ICON}</button>`;
@@ -109,7 +146,7 @@ function trailingAction(task, hasSubs) {
   if (hasSubs) {
     return `<button type="button" class="expand-btn" data-expand="${task.id}" aria-label="Подзадачи">${CHEVRON_ICON}</button>`;
   }
-  return `<span></span>`;
+  return `<span class="row-spacer"></span>`;
 }
 
 function renderTasks() {
@@ -119,7 +156,6 @@ function renderTasks() {
 
   $("#current-day-label").textContent = capitalize(state.selectedDay);
 
-  // в режиме редактирования все списки раскрыты
   if (state.editMode) {
     for (const task of tasks) {
       if (task.subtasks?.length) state.expanded.add(task.id);
@@ -131,21 +167,29 @@ function renderTasks() {
       const hasSubs = task.subtasks?.length > 0;
       const expanded = state.editMode ? hasSubs : state.expanded.has(task.id);
       const done = taskComplete(task);
+      const leafDesc = !hasSubs && task.description ? task.description : "";
 
       const subs = hasSubs
         ? `<div class="subtasks"><div class="subtasks-inner">
             ${task.subtasks
-              .map(
-                (s) => `<div class="task-row sub" data-sub-id="${s.id}" data-parent="${task.id}">
-                  <button type="button" class="check ${isDone(s.id) ? "done" : ""}" data-toggle="${s.id}" aria-label="Готово"></button>
-                  <span class="task-title ${isDone(s.id) ? "done" : ""}">${escapeHtml(s.title)}</span>
-                  ${
-                    state.editMode
-                      ? `<button type="button" class="delete-btn sub-delete" data-delete-sub="${s.id}" data-parent="${task.id}" aria-label="Удалить подзадачу">${DELETE_ICON}</button>`
-                      : ""
-                  }
-                </div>`
-              )
+              .map((s) => {
+                const subDesc = s.description || "";
+                return `<div class="sub-block" data-sub-wrap="${s.id}">
+                  <div class="task-row sub" data-sub-id="${s.id}" data-parent="${task.id}">
+                    <button type="button" class="check ${isDone(s.id) ? "done" : ""}" data-toggle="${s.id}" aria-label="Готово"></button>
+                    <div class="title-wrap">
+                      <span class="task-title ${isDone(s.id) ? "done" : ""}">${escapeHtml(s.title)}</span>
+                      ${infoBtn(s.id, !!subDesc)}
+                    </div>
+                    ${
+                      state.editMode
+                        ? `<button type="button" class="delete-btn sub-delete" data-delete-sub="${s.id}" data-parent="${task.id}" aria-label="Удалить подзадачу">${DELETE_ICON}</button>`
+                        : `<span class="row-spacer"></span>`
+                    }
+                  </div>
+                  ${descBlock(s.id, subDesc)}
+                </div>`;
+              })
               .join("")}
           </div></div>`
         : "";
@@ -153,9 +197,13 @@ function renderTasks() {
       return `<article class="task-card ${expanded ? "expanded" : ""}" data-id="${task.id}" data-kind="${task.kind}">
         <div class="task-row">
           <button type="button" class="check ${done ? "done" : ""}" data-toggle="${task.id}" data-parent-toggle="${hasSubs ? "1" : ""}" aria-label="Готово"></button>
-          <span class="task-title ${done ? "done" : ""}">${escapeHtml(task.title)}</span>
+          <div class="title-wrap">
+            <span class="task-title ${done ? "done" : ""}">${escapeHtml(task.title)}</span>
+            ${infoBtn(task.id, !!leafDesc)}
+          </div>
           ${trailingAction(task, hasSubs)}
         </div>
+        ${descBlock(task.id, leafDesc)}
         ${subs}
       </article>`;
     })
@@ -203,6 +251,7 @@ function setTab(tab) {
   state.tab = tab;
   $("#tab-week").classList.toggle("active", tab === "week");
   $("#tab-streak").classList.toggle("active", tab === "streak");
+  syncTelegramChrome();
   if (tab === "streak") renderStreak();
 }
 
@@ -214,11 +263,9 @@ function toggleEdit(force) {
   renderTasks();
 }
 
-/** Полный цикл анимации нажатия на карточке (не обрывается при отпускании) */
 function playPressAnim(card) {
   if (!card || card.classList.contains("dragging")) return;
   card.classList.remove("press-anim");
-  // restart animation
   void card.offsetWidth;
   card.classList.add("press-anim");
   const done = () => {
@@ -228,7 +275,6 @@ function playPressAnim(card) {
   card.addEventListener("animationend", done);
 }
 
-/** Обновить галочки/зачёркивание без перерисовки всего списка */
 function refreshDoneUI() {
   const dateKey = dateKeyForSelectedDay();
   const tasks = buildDayTasks(state.store, state.selectedDay, dateKey);
@@ -237,8 +283,8 @@ function refreshDoneUI() {
     const card = $(`.task-card[data-id="${task.id}"]`);
     if (!card) continue;
     const done = taskComplete(task);
-    const mainCheck = card.querySelector(".task-row:not(.sub) .check");
-    const mainTitle = card.querySelector(".task-row:not(.sub) .task-title");
+    const mainCheck = card.querySelector(":scope > .task-row .check");
+    const mainTitle = card.querySelector(":scope > .task-row .task-title");
     mainCheck?.classList.toggle("done", done);
     mainTitle?.classList.toggle("done", done);
 
@@ -262,7 +308,6 @@ async function persist() {
     console.error(err);
     tg()?.showAlert?.("Не удалось сохранить в KV. Проверьте привязку PLANER_KV.");
   }
-  // обновляем огонёк сразу (даже если вкладка не открыта)
   renderStreak();
   if (after > before) {
     tg()?.HapticFeedback?.notificationOccurred?.("success");
@@ -279,19 +324,22 @@ function closeModal(id) {
 
 function openAddModal() {
   $("#add-task-input").value = "";
+  $("#add-task-desc").value = "";
   openModal("modal-add");
   setTimeout(() => $("#add-task-input").focus(), 50);
 }
 
-function addTask(title) {
+function addTask(title, description = "") {
   title = title.trim();
   if (!title) return;
+  description = String(description || "").trim().slice(0, DESC_MAX);
   const dateKey = dateKeyForSelectedDay();
   if (!state.store.extraTasks[dateKey]) state.store.extraTasks[dateKey] = [];
 
   const task = {
-    id: `extra_${Math.random().toString(36).slice(2, 9)}`,
+    id: `extra_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
     title,
+    description,
     kind: "once",
     subtasks: [],
   };
@@ -318,6 +366,7 @@ function deleteTask(taskId) {
 
   removeTaskFromSources(taskId, dateKey, dayName);
   state.expanded.delete(taskId);
+  state.descOpen.delete(taskId);
 
   const remaining = buildDayTasks(state.store, dayName, dateKey);
   state.store.order[dateKey] = remaining.map((t) => t.id);
@@ -333,6 +382,7 @@ function deleteSubtask(parentId, subId) {
 
   const map = doneMap();
   delete map[subId];
+  state.descOpen.delete(subId);
 
   const extras = state.store.extraTasks[dateKey] || [];
   const ei = extras.findIndex((t) => t.id === parentId);
@@ -365,7 +415,11 @@ function handleReorder({ fromId, toId, mode }) {
     const parent = tasks.find((t) => t.id === toId);
     if (!parent) return;
     if (!parent.subtasks) parent.subtasks = [];
-    parent.subtasks.push({ id: moved.id, title: moved.title });
+    parent.subtasks.push({
+      id: moved.id,
+      title: moved.title,
+      description: moved.description || "",
+    });
     for (const s of moved.subtasks || []) parent.subtasks.push(s);
     removeTaskFromSources(fromId, dateKey, dayName);
     syncParentSubtasks(parent, dateKey, dayName);
@@ -436,7 +490,6 @@ function bindEvents() {
   $("#btn-done-edit").addEventListener("click", () => toggleEdit(false));
   $("#btn-add-task").addEventListener("click", () => openAddModal());
   $("#btn-to-streak").addEventListener("click", () => setTab("streak"));
-  $("#btn-back-week").addEventListener("click", () => setTab("week"));
 
   $("#task-list").addEventListener("click", (e) => {
     const delSub = e.target.closest("[data-delete-sub]");
@@ -450,6 +503,17 @@ function bindEvents() {
     if (del) {
       e.stopPropagation();
       deleteTask(del.dataset.delete);
+      return;
+    }
+
+    const descToggle = e.target.closest("[data-desc-toggle]");
+    if (descToggle) {
+      e.stopPropagation();
+      const id = descToggle.dataset.descToggle;
+      if (state.descOpen.has(id)) state.descOpen.delete(id);
+      else state.descOpen.add(id);
+      const block = $(`.task-desc[data-desc-for="${id}"]`);
+      if (block) block.classList.toggle("open", state.descOpen.has(id));
       return;
     }
 
@@ -491,7 +555,6 @@ function bindEvents() {
           const parent = tasks.find((t) => t.id === parentId);
           if (parent) setDone(parent.id, taskComplete(parent));
         } else if (task?.subtasks?.length) {
-          // клик по заголовку списка без parent-toggle — синхронизируем подзадачи
           const next = isDone(id);
           for (const s of task.subtasks) setDone(s.id, next);
         }
@@ -518,13 +581,13 @@ function bindEvents() {
   });
 
   $("#btn-confirm-add").addEventListener("click", () => {
-    addTask($("#add-task-input").value);
+    addTask($("#add-task-input").value, $("#add-task-desc").value);
     closeModal("modal-add");
   });
 
   $("#add-task-input").addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
-      addTask($("#add-task-input").value);
+      addTask($("#add-task-input").value, $("#add-task-desc").value);
       closeModal("modal-add");
     }
   });
@@ -560,8 +623,6 @@ async function boot() {
     );
   }
 
-  // Первый запуск в понедельник — сброс галочек прошлых дней
-  applyMondayWeekReset(state.store, new Date());
   evaluateStreak(state.store, new Date());
   try {
     await saveStore(state.store);
@@ -571,6 +632,7 @@ async function boot() {
   renderDayMenu();
   renderTasks();
   renderStreak();
+  syncTelegramChrome();
 }
 
 boot();

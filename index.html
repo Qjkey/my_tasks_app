@@ -48,16 +48,6 @@
 
     <!-- ===== Огонёк ===== -->
     <section id="tab-streak" class="tab" aria-label="Огонёк">
-      <header class="top-bar streak-top">
-        <button type="button" id="btn-back-week" class="icon-btn" title="Назад" aria-label="Назад">
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-            <polyline points="15 18 9 12 15 6" />
-          </svg>
-        </button>
-        <span class="streak-title">Огонёк</span>
-        <span class="icon-btn-spacer" aria-hidden="true"></span>
-      </header>
-
       <div class="streak-hero">
         <div class="flame-wrap" aria-hidden="true">
           <svg class="flame-icon" viewBox="0 0 64 80" width="88" height="110" aria-hidden="true">
@@ -75,12 +65,13 @@
     </section>
   </div>
 
-  <!-- Модалка добавления задачи (TMA-style) -->
+  <!-- Модалка добавления задачи -->
   <div id="modal-add" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="modal-add-title">
     <div class="modal-backdrop" data-close="modal-add"></div>
     <div class="modal-sheet">
       <h2 id="modal-add-title">Новая задача</h2>
       <input type="text" id="add-task-input" class="modal-input" placeholder="Название задачи" maxlength="200" autocomplete="off" />
+      <input type="text" id="add-task-desc" class="modal-input" placeholder="Описание (необязательно, до 64)" maxlength="64" autocomplete="off" />
       <div class="modal-actions">
         <button type="button" class="modal-btn ghost" data-close="modal-add">Отмена</button>
         <button type="button" class="modal-btn accent" id="btn-confirm-add">Добавить</button>
@@ -93,8 +84,8 @@
     <div class="modal-backdrop" data-close="modal-code"></div>
     <div class="modal-sheet wide">
       <h2 id="modal-code-title">Код задач</h2>
-      <p class="modal-hint">Вставьте код планера целиком. Сохранится в Cloudflare KV.</p>
-      <textarea id="code-textarea" class="code-area" spellcheck="false" placeholder="(понедельник)&#10;[] { Задача }"></textarea>
+      <p class="modal-hint">Описание: [] { Название | текст до 64 символов }. Маркеры [{x}] и [{xx}] больше не используются — берите [{}].</p>
+      <textarea id="code-textarea" class="code-area" spellcheck="false" placeholder="(понедельник)&#10;[] { Задача | описание }"></textarea>
       <div class="modal-actions">
         <button type="button" class="modal-btn ghost" data-close="modal-code">Отмена</button>
         <button type="button" class="modal-btn accent" id="btn-save-code">Сохранить</button>

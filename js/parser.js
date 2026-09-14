@@ -3,12 +3,14 @@
  *
  * Маркеры:
  *   []      — каждый день
- *   [x]/xx] — один раз в этот день (латиница/кириллица)
+ *   [x]/х]  — один раз в этот день
  *   [xx]/хх]— каждую неделю в этот день
- *   [{}]    — каждый день + подзадачи
- *   [{x}]   — один раз + подзадачи
- *   [{xx}]  — еженедельно + подзадачи
+ *   [{}]    — список с подзадачами (в рамках дня из секции)
  *   - {..}  — подзадача
+ *
+ * Описание (до 64 символов) — через « | » внутри скобок:
+ *   [] { Купить молоко | 2.5%, не забыть }
+ *   - { Умыться | холодной водой }
  */
 
 export const DAYS = [
@@ -22,6 +24,7 @@ export const DAYS = [
 ];
 
 export const DAY_SHORT = ["ПН", "ВТ", "СР", "ЧТ", "ПТ", "СБ", "ВС"];
+export const DESC_MAX = 64;
 
 const DAY_ALIASES = {
   пн: "понедельник",
@@ -46,24 +49,40 @@ function normalizeDay(raw) {
   return DAY_ALIASES[s] || null;
 }
 
-function uid(prefix = "t") {
-  return `${prefix}_${Math.random().toString(36).slice(2, 9)}_${Date.now().toString(36)}`;
+/** Стабильный id — не ломает галочки при повторном сохранении кода */
+function stableId(prefix, parts) {
+  const raw = parts.join("|");
+  let h = 2166136261;
+  for (let i = 0; i < raw.length; i++) {
+    h ^= raw.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return `${prefix}_${(h >>> 0).toString(36)}`;
 }
 
-/** Нормализует маркер типа: daily | once | weekly */
+/** Нормализует маркер: daily | once | weekly (+ hasSubs) */
 function classifyMarker(marker) {
   const m = marker
     .toLowerCase()
-    .replace(/х/g, "x") // кириллическая х → x
+    .replace(/х/g, "x")
     .replace(/\s+/g, "");
 
   if (m === "[]") return { kind: "daily", hasSubs: false };
   if (m === "[x]") return { kind: "once", hasSubs: false };
   if (m === "[xx]") return { kind: "weekly", hasSubs: false };
   if (m === "[{}]") return { kind: "daily", hasSubs: true };
-  if (m === "[{x}]") return { kind: "once", hasSubs: true };
-  if (m === "[{xx}]") return { kind: "weekly", hasSubs: true };
+  // устаревшие [{x}] / [{xx}] — больше не поддерживаются
   return null;
+}
+
+function splitTitleDesc(inner) {
+  const idx = inner.indexOf("|");
+  if (idx === -1) {
+    return { title: inner.trim(), description: "" };
+  }
+  const title = inner.slice(0, idx).trim();
+  const description = inner.slice(idx + 1).trim().slice(0, DESC_MAX);
+  return { title, description };
 }
 
 const DAY_RE = /^\(\s*([^)]+?)\s*\)\s*$/u;
@@ -77,6 +96,7 @@ export function parseTaskCode(text) {
   const days = Object.fromEntries(DAYS.map((d) => [d, []]));
   let current = null;
   let lastParent = null;
+  let taskIndex = 0;
 
   const lines = String(text || "").replace(/\r\n/g, "\n").split("\n");
 
@@ -89,6 +109,7 @@ export function parseTaskCode(text) {
       const day = normalizeDay(dayMatch[1]);
       current = day;
       lastParent = null;
+      taskIndex = 0;
       continue;
     }
 
@@ -96,9 +117,12 @@ export function parseTaskCode(text) {
 
     const subMatch = line.match(SUB_RE);
     if (subMatch && lastParent) {
+      const { title, description } = splitTitleDesc(subMatch[1]);
+      const subIndex = lastParent.subtasks.length;
       lastParent.subtasks.push({
-        id: uid("s"),
-        title: subMatch[1],
+        id: stableId("s", [current, lastParent.id, title, subIndex]),
+        title,
+        description,
       });
       continue;
     }
@@ -110,12 +134,15 @@ export function parseTaskCode(text) {
         lastParent = null;
         continue;
       }
+      const { title, description } = splitTitleDesc(taskMatch[2]);
       const task = {
-        id: uid("t"),
-        title: taskMatch[2],
-        kind: meta.kind, // daily | once | weekly
+        id: stableId("t", [current, meta.kind, title, taskIndex]),
+        title,
+        description: meta.hasSubs ? "" : description,
+        kind: meta.kind,
         subtasks: [],
       };
+      taskIndex += 1;
       days[current].push(task);
       lastParent = meta.hasSubs ? task : null;
       continue;
@@ -127,7 +154,6 @@ export function parseTaskCode(text) {
   return { template: String(text || ""), days };
 }
 
-/** JS getDay(): 0=вс … 6=сб → наш индекс пн=0 */
 export function jsDayToIndex(jsDay) {
   return jsDay === 0 ? 6 : jsDay - 1;
 }
@@ -152,7 +178,6 @@ export function parseDateKey(key) {
   return new Date(y, m - 1, d);
 }
 
-/** Понедельник недели, содержащей date */
 export function startOfWeek(date = new Date()) {
   const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
   const idx = jsDayToIndex(d.getDay());
@@ -168,11 +193,11 @@ export function addDays(date, n) {
 
 /**
  * Список задач на конкретную календарную дату.
- * once-задачи скрываются, если уже были «погашены» в completions.onceDone
+ * Порядок только по dateKey (не по имени дня — иначе путаются недели).
  */
 export function buildDayTasks(store, dayName, dateKey) {
   const templateTasks = store.days?.[dayName] || [];
-  const order = store.order?.[dateKey] || store.order?.[dayName] || null;
+  const order = store.order?.[dateKey] || null;
   const onceDone = store.onceDone || {};
 
   let list = templateTasks
@@ -180,21 +205,26 @@ export function buildDayTasks(store, dayName, dateKey) {
       if (t.kind !== "once") return true;
       const doneOn = onceDone[t.id];
       if (!doneOn) return true;
-      // Показываем в день выполнения (как выполненную), скрываем только в следующие дни
       return doneOn === dateKey;
     })
     .map((t) => ({
       ...t,
-      subtasks: (t.subtasks || []).map((s) => ({ ...s })),
+      description: t.description || "",
+      subtasks: (t.subtasks || []).map((s) => ({
+        ...s,
+        description: s.description || "",
+      })),
     }));
 
-  // Пользовательские задачи, добавленные через «Добавить» на эту дату
   const extras = (store.extraTasks?.[dateKey] || []).map((t) => ({
     ...t,
-    subtasks: (t.subtasks || []).map((s) => ({ ...s })),
+    description: t.description || "",
+    subtasks: (t.subtasks || []).map((s) => ({
+      ...s,
+      description: s.description || "",
+    })),
   }));
 
-  // Если есть сохранённый порядок id — применяем
   const combined = [...list, ...extras];
   if (order?.length) {
     const map = new Map(combined.map((t) => [t.id, t]));
@@ -205,11 +235,14 @@ export function buildDayTasks(store, dayName, dateKey) {
         map.delete(id);
       }
     }
-    for (const t of map.values()) ordered.push(t);
-    return ordered;
+    // новые extra, которых ещё нет в order — сверху
+    const leftover = [...map.values()];
+    const extraIds = new Set(extras.map((e) => e.id));
+    const leftoverExtras = leftover.filter((t) => extraIds.has(t.id));
+    const leftoverRest = leftover.filter((t) => !extraIds.has(t.id));
+    return [...leftoverExtras, ...ordered, ...leftoverRest];
   }
 
-  // extras сверху (как просил пользователь — новые в самый верх)
   return [...extras, ...list];
 }
 
@@ -217,18 +250,16 @@ export function emptyStore() {
   return {
     template: "",
     days: Object.fromEntries(DAYS.map((d) => [d, []])),
-    completions: {}, // { [dateKey]: { [taskOrSubId]: true } }
-    onceDone: {}, // { [taskId]: dateKey }
-    extraTasks: {}, // { [dateKey]: Task[] }
-    order: {}, // { [dateKey|dayName]: id[] }
+    completions: {},
+    onceDone: {},
+    extraTasks: {},
+    order: {},
     streak: {
       count: 0,
       lastSuccessDate: null,
-      history: {}, // { [dateKey]: true|false }
+      history: {},
     },
-    meta: {
-      mondayResetWeek: null,
-    },
+    meta: {},
     updatedAt: null,
   };
 }
