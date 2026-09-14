@@ -57,6 +57,7 @@ export async function loadStore() {
       const parsed = parseTaskCode(text);
       store.template = parsed.template;
       store.days = parsed.days;
+      store.lists = parsed.lists || {};
       await saveStore(store);
       return store;
     }
@@ -81,6 +82,7 @@ function migrate(data) {
     ...base,
     ...data,
     days: { ...base.days, ...(data.days || {}) },
+    lists: { ...(data.lists || {}) },
     completions: data.completions || {},
     onceDone: data.onceDone || {},
     extraTasks: data.extraTasks || {},
@@ -94,7 +96,9 @@ export function applyTemplate(store, codeText) {
   const parsed = parseTaskCode(codeText);
   store.template = parsed.template;
   store.days = parsed.days;
-  for (const key of Object.keys(store.order)) {
+  store.lists = parsed.lists || {};
+  // completions / onceDone / streak.history НЕ трогаем
+  for (const key of Object.keys(store.order || {})) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) delete store.order[key];
   }
   return store;

@@ -27,7 +27,9 @@ export function requiredTasks(store, dateKey) {
   const dayName = dayNameFromDate(parseDateKey(dateKey));
   const tasks = buildDayTasks(store, dayName, dateKey);
   return tasks.filter(
-    (t) => t.kind === "daily" || t.kind === "weekly" || t.kind === "once"
+    (t) =>
+      (t.kind === "daily" || t.kind === "weekly" || t.kind === "once") &&
+      t.kind !== "adaptive"
   );
 }
 
@@ -70,9 +72,8 @@ export function evaluateStreak(store, today = new Date()) {
 
     if (isDayFullyDone(store, key)) {
       store.streak.history[key] = true;
-    } else if (key === todayKey) {
-      store.streak.history[key] = false;
     }
+    // никогда не сбрасываем history в false — выполненные дни не отменяются
   }
 
   // если сегодня нет задач — не считаем «успехом сегодня», идём от вчера

@@ -392,7 +392,8 @@ textarea {
 
 .task-desc-inner {
   min-height: 0;
-  padding: 0 12px 10px 44px;
+  overflow: hidden;
+  padding: 0 12px 0 44px;
   font-size: 0.85rem;
   line-height: 1.35;
   color: var(--text-muted);
@@ -400,8 +401,33 @@ textarea {
   word-break: break-word;
 }
 
+.task-desc.open .task-desc-inner {
+  padding-bottom: 10px;
+}
+
 .sub-block .task-desc-inner {
   padding-left: 64px;
+}
+
+.subtasks {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.28s ease;
+  overflow: hidden;
+}
+
+.task-card.expanded .subtasks {
+  grid-template-rows: 1fr;
+}
+
+.subtasks-inner {
+  min-height: 0;
+  overflow: hidden;
+  padding-bottom: 0;
+}
+
+.task-card.expanded .subtasks-inner {
+  padding-bottom: 6px;
 }
 
 .check {
@@ -490,24 +516,13 @@ textarea {
   transform: rotate(180deg);
 }
 
-.subtasks {
-  display: grid;
-  grid-template-rows: 0fr;
-  transition: grid-template-rows 0.28s ease;
-  overflow: hidden;
-}
-
-.task-card.expanded .subtasks {
-  grid-template-rows: 1fr;
-}
-
-.subtasks-inner {
-  min-height: 0;
-  padding-bottom: 6px;
+body.edit-mode .task-list {
+  touch-action: none;
 }
 
 body.edit-mode .task-card {
   cursor: grab;
+  touch-action: none;
 }
 
 body.edit-mode .task-card:active {
@@ -556,6 +571,63 @@ body.edit-mode .task-row.sub .check {
 
 #tab-streak .streak-hero {
   padding-top: 8px;
+}
+
+.lists-header {
+  padding: 20px 16px 8px;
+}
+
+.lists-heading {
+  font-size: 1.4rem;
+  font-weight: 800;
+  color: var(--text);
+}
+
+.lists-sub {
+  margin-top: 6px;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.lists-sub code {
+  font-size: 0.8rem;
+  color: var(--accent);
+}
+
+.lists-empty {
+  text-align: center;
+  color: var(--text-muted);
+  line-height: 1.55;
+  padding: 28px 16px;
+  font-size: 0.95rem;
+}
+
+.lists-empty.soft {
+  padding: 8px 16px 12px;
+  font-size: 0.85rem;
+}
+
+.lists-empty code {
+  color: var(--accent);
+  font-size: 0.85rem;
+}
+
+.list-badge {
+  display: grid;
+  place-items: center;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--accent);
+  min-width: 40px;
+}
+
+.sub-dot {
+  width: 6px;
+  height: 6px;
+  margin: 0 auto;
+  border-radius: 50%;
+  background: var(--text-dim);
 }
 
 .streak-hero {

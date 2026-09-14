@@ -64,15 +64,22 @@ function initTelegram() {
     w.BackButton.hide();
     w.BackButton.onClick(() => setTab("week"));
   } catch (_) {}
+
+  try {
+    if (w.SettingsButton) {
+      w.SettingsButton.show();
+      w.SettingsButton.onClick(() => setTab("lists"));
+    }
+  } catch (_) {}
 }
 
 function syncTelegramChrome() {
   const w = tg();
   if (!w) return;
   try {
-    if (state.tab === "streak") {
+    if (state.tab === "streak" || state.tab === "lists") {
       w.BackButton.show();
-      document.title = "Огонёк";
+      document.title = state.tab === "streak" ? "Огонёк" : "Списки";
     } else {
       w.BackButton.hide();
       document.title = "Планер";
@@ -249,10 +256,51 @@ function renderStreak() {
 
 function setTab(tab) {
   state.tab = tab;
-  $("#tab-week").classList.toggle("active", tab === "week");
-  $("#tab-streak").classList.toggle("active", tab === "streak");
+  $("#tab-week")?.classList.toggle("active", tab === "week");
+  $("#tab-streak")?.classList.toggle("active", tab === "streak");
+  $("#tab-lists")?.classList.toggle("active", tab === "lists");
   syncTelegramChrome();
   if (tab === "streak") renderStreak();
+  if (tab === "lists") renderLists();
+}
+
+function renderLists() {
+  const root = $("#lists-root");
+  if (!root) return;
+  const lists = Object.values(state.store.lists || {}).sort(
+    (a, b) => Number(a.listId) - Number(b.listId)
+  );
+
+  if (!lists.length) {
+    root.innerHTML = `<p class="lists-empty">Пока нет адаптивных списков.<br/>В коде после дней добавьте:<br/><code>[{1}] { Покупки }</code><br/><code>    - { Молоко }</code><br/>А в дне закрепите: <code>[{1}]</code></p>`;
+    return;
+  }
+
+  root.innerHTML = lists
+    .map((list) => {
+      const open = state.expanded.has(`listview_${list.listId}`);
+      return `<article class="task-card ${open ? "expanded" : ""}" data-list-view="${list.listId}">
+        <div class="task-row">
+          <span class="list-badge">[{${list.listId}}]</span>
+          <div class="title-wrap">
+            <span class="task-title">${escapeHtml(list.title)}</span>
+          </div>
+          <button type="button" class="expand-btn" data-expand-list="${list.listId}" aria-label="Пункты">${CHEVRON_ICON}</button>
+        </div>
+        <div class="subtasks"><div class="subtasks-inner">
+          ${(list.subtasks || [])
+            .map(
+              (s) => `<div class="task-row sub">
+                <span class="sub-dot"></span>
+                <span class="task-title">${escapeHtml(s.title)}</span>
+                <span class="row-spacer"></span>
+              </div>`
+            )
+            .join("") || `<p class="lists-empty soft">Пустой список</p>`}
+        </div></div>
+      </article>`;
+    })
+    .join("");
 }
 
 function toggleEdit(force) {
@@ -359,12 +407,14 @@ function deleteTask(taskId) {
   const task = tasks.find((t) => t.id === taskId);
   if (!task) return;
 
-  const map = doneMap();
-  delete map[taskId];
-  for (const s of task.subtasks || []) delete map[s.id];
+  // completions не трогаем — история выполнения сохраняется
   delete state.store.onceDone[taskId];
 
   removeTaskFromSources(taskId, dateKey, dayName);
+  // listref: order может держать alist_ id
+  if (task.listId) {
+    removeTaskFromSources(`alist_${task.listId}`, dateKey, dayName);
+  }
   state.expanded.delete(taskId);
   state.descOpen.delete(taskId);
 
@@ -380,9 +430,22 @@ function deleteSubtask(parentId, subId) {
   const dateKey = dateKeyForSelectedDay();
   const dayName = state.selectedDay;
 
-  const map = doneMap();
-  delete map[subId];
   state.descOpen.delete(subId);
+
+  // adaptive list — правим библиотеку
+  const parentTask = buildDayTasks(state.store, dayName, dateKey).find(
+    (t) => t.id === parentId
+  );
+  if (parentTask?.kind === "adaptive" && parentTask.listId) {
+    const lib = state.store.lists?.[parentTask.listId];
+    if (lib) {
+      lib.subtasks = (lib.subtasks || []).filter((s) => s.id !== subId);
+    }
+    renderTasks();
+    persist();
+    tg()?.HapticFeedback?.impactOccurred?.("medium");
+    return;
+  }
 
   const extras = state.store.extraTasks[dateKey] || [];
   const ei = extras.findIndex((t) => t.id === parentId);
@@ -441,8 +504,15 @@ function removeTaskFromSources(taskId, dateKey, dayName) {
   const extras = state.store.extraTasks[dateKey] || [];
   state.store.extraTasks[dateKey] = extras.filter((t) => t.id !== taskId);
 
-  const dayList = state.store.days[dayName] || [];
-  state.store.days[dayName] = dayList.filter((t) => t.id !== taskId);
+  let dayList = state.store.days[dayName] || [];
+  dayList = dayList.filter((t) => t.id !== taskId);
+  if (String(taskId).startsWith("alist_")) {
+    const listId = String(taskId).slice("alist_".length);
+    dayList = dayList.filter(
+      (t) => !(t.kind === "listref" && String(t.listId) === listId)
+    );
+  }
+  state.store.days[dayName] = dayList;
 
   if (state.store.order[dateKey]) {
     state.store.order[dateKey] = state.store.order[dateKey].filter((id) => id !== taskId);
@@ -572,6 +642,15 @@ function bindEvents() {
       persist();
       tg()?.HapticFeedback?.impactOccurred?.("light");
     }
+  });
+
+  $("#lists-root")?.addEventListener("click", (e) => {
+    const exp = e.target.closest("[data-expand-list]");
+    if (!exp) return;
+    const id = `listview_${exp.dataset.expandList}`;
+    if (state.expanded.has(id)) state.expanded.delete(id);
+    else state.expanded.add(id);
+    renderLists();
   });
 
   enableDragDrop($("#task-list"), { onReorder: handleReorder });

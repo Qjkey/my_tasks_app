@@ -63,6 +63,15 @@
         <div class="week-calendar-row" id="week-calendar-row"></div>
       </div>
     </section>
+
+    <!-- ===== Адаптивные списки ===== -->
+    <section id="tab-lists" class="tab" aria-label="Списки">
+      <header class="lists-header">
+        <h1 class="lists-heading">Списки</h1>
+        <p class="lists-sub">Как Keep: не влияют на огонёк. Закрепляйте в днях через <code>[{1}]</code>.</p>
+      </header>
+      <main id="lists-root" class="task-list lists-root"></main>
+    </section>
   </div>
 
   <!-- Модалка добавления задачи -->
@@ -84,7 +93,7 @@
     <div class="modal-backdrop" data-close="modal-code"></div>
     <div class="modal-sheet wide">
       <h2 id="modal-code-title">Код задач</h2>
-      <p class="modal-hint">Описание: [] { Название | текст до 64 символов }. Маркеры [{x}] и [{xx}] больше не используются — берите [{}].</p>
+      <p class="modal-hint">Описание: [] { Название | текст }. Списки: [{1}] { Покупки } и пункты «-». В дне закрепить: [{1}].</p>
       <textarea id="code-textarea" class="code-area" spellcheck="false" placeholder="(понедельник)&#10;[] { Задача | описание }"></textarea>
       <div class="modal-actions">
         <button type="button" class="modal-btn ghost" data-close="modal-code">Отмена</button>

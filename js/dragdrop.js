@@ -1,6 +1,6 @@
 /**
- * Drag-and-drop в режиме редактирования.
- * Упрощённый hit-test: ближайшая карточка по Y, широкие зоны before/after.
+ * Drag-and-drop (мышь + тач).
+ * В edit-mode: touch-action:none, захват на document, мягкий hit-test.
  */
 
 export function enableDragDrop(listEl, { onReorder }) {
@@ -12,6 +12,8 @@ export function enableDragDrop(listEl, { onReorder }) {
   let active = false;
   let lastTarget = null;
   let lastMode = null;
+  let lastY = 0;
+  let lastX = 0;
 
   function clearHints() {
     listEl.querySelectorAll(".drop-before, .drop-after, .drop-target").forEach((el) => {
@@ -24,7 +26,6 @@ export function enableDragDrop(listEl, { onReorder }) {
     return [...listEl.querySelectorAll(".task-card")].filter((c) => c !== dragEl);
   }
 
-  /** Ближайшая карточка к точке (с запасом по вертикали между элементами) */
   function nearestCard(x, y) {
     const list = cards();
     if (!list.length) return null;
@@ -34,28 +35,22 @@ export function enableDragDrop(listEl, { onReorder }) {
 
     for (const card of list) {
       const r = card.getBoundingClientRect();
-      // расширяем hitbox вверх/вниз на половину gap
-      const top = r.top - 8;
-      const bottom = r.bottom + 8;
+      const mid = r.top + r.height / 2;
+      const top = r.top - 16;
+      const bottom = r.bottom + 16;
       let dist;
       if (y >= top && y <= bottom) {
-        dist = Math.abs(y - (r.top + r.height / 2)) * 0.25;
+        dist = Math.abs(y - mid) * 0.2;
       } else if (y < top) {
         dist = top - y;
       } else {
         dist = y - bottom;
       }
-      // лёгкий штраф по X, если далеко в сторону
-      dist += Math.max(0, Math.abs(x - (r.left + r.width / 2)) - r.width) * 0.15;
-
       if (dist < bestDist) {
         bestDist = dist;
         best = card;
       }
     }
-
-    // не цепляем слишком далёкие
-    if (bestDist > 120) return null;
     return best;
   }
 
@@ -63,13 +58,8 @@ export function enableDragDrop(listEl, { onReorder }) {
     const rect = card.getBoundingClientRect();
     const rel = (y - rect.top) / Math.max(rect.height, 1);
     const expanded = card.classList.contains("expanded");
-
-    // into только у раскрытых и только узкая средняя зона
-    if (expanded && rel > 0.4 && rel < 0.75) {
-      return "into";
-    }
-    // широкие зоны перестановки
-    if (rel < 0.55) return "before";
+    if (expanded && rel > 0.35 && rel < 0.8) return "into";
+    if (rel < 0.5) return "before";
     return "after";
   }
 
@@ -84,10 +74,52 @@ export function enableDragDrop(listEl, { onReorder }) {
     lastMode = mode;
   }
 
+  function finish(commit) {
+    if (!dragEl) return;
+
+    let payload = null;
+    if (commit && active) {
+      let target = lastTarget;
+      let mode = lastMode;
+      if (!target) {
+        target = nearestCard(lastX, lastY);
+        if (target) mode = resolveMode(target, lastY);
+      }
+      if (target && target.dataset.id !== dragId && mode) {
+        payload = { fromId: dragId, toId: target.dataset.id, mode };
+      }
+    }
+
+    dragEl.classList.remove("dragging");
+    dragEl.style.transform = "";
+    dragEl.style.zIndex = "";
+    clearHints();
+
+    try {
+      if (pointerId != null) dragEl.releasePointerCapture(pointerId);
+    } catch (_) {}
+
+    dragEl = null;
+    dragId = null;
+    pointerId = null;
+    active = false;
+    lastTarget = null;
+    lastMode = null;
+
+    document.removeEventListener("pointermove", onPointerMove);
+    document.removeEventListener("pointerup", onPointerUp);
+    document.removeEventListener("pointercancel", onPointerCancel);
+
+    if (payload) onReorder(payload);
+  }
+
   function onPointerDown(e) {
     if (!document.body.classList.contains("edit-mode")) return;
+    if (e.button != null && e.button !== 0) return;
     if (e.target.closest(".task-row.sub")) return;
-    if (e.target.closest("[data-delete], .delete-btn, [data-delete-sub]")) return;
+    if (e.target.closest("[data-delete], .delete-btn, [data-delete-sub], .info-btn, .check")) {
+      return;
+    }
 
     const card = e.target.closest(".task-card");
     if (!card || !listEl.contains(card)) return;
@@ -97,6 +129,8 @@ export function enableDragDrop(listEl, { onReorder }) {
     pointerId = e.pointerId;
     startY = e.clientY;
     startX = e.clientX;
+    lastX = e.clientX;
+    lastY = e.clientY;
     active = false;
     lastTarget = null;
     lastMode = null;
@@ -104,22 +138,36 @@ export function enableDragDrop(listEl, { onReorder }) {
     try {
       card.setPointerCapture(pointerId);
     } catch (_) {}
+
+    document.addEventListener("pointermove", onPointerMove, { passive: false });
+    document.addEventListener("pointerup", onPointerUp);
+    document.addEventListener("pointercancel", onPointerCancel);
+
+    // на таче блокируем скролл сразу в edit-mode
+    if (e.pointerType === "touch") {
+      e.preventDefault();
+    }
   }
 
   function onPointerMove(e) {
     if (!dragEl || e.pointerId !== pointerId) return;
 
+    lastX = e.clientX;
+    lastY = e.clientY;
     const dy = e.clientY - startY;
     const dx = e.clientX - startX;
+    const isTouch = e.pointerType === "touch";
+    const threshold = isTouch ? 8 : 3;
 
-    // старт после небольшого сдвига — проще «подхватить»
     if (!active) {
-      if (Math.abs(dy) < 4 && Math.abs(dx) < 4) return;
+      if (Math.hypot(dx, dy) < threshold) return;
       active = true;
       dragEl.classList.add("dragging");
+      dragEl.style.zIndex = "60";
     }
 
-    dragEl.style.transform = `translateY(${dy}px) scale(1.02)`;
+    e.preventDefault();
+    dragEl.style.transform = `translateY(${dy}px) scale(1.03)`;
 
     const under = nearestCard(e.clientX, e.clientY);
     if (!under) {
@@ -128,52 +176,26 @@ export function enableDragDrop(listEl, { onReorder }) {
       lastMode = null;
       return;
     }
-
     applyHint(under, resolveMode(under, e.clientY));
   }
 
   function onPointerUp(e) {
     if (!dragEl || e.pointerId !== pointerId) return;
-
-    let payload = null;
-
-    if (active) {
-      let target = lastTarget;
-      let mode = lastMode;
-
-      // если отпустили «мимо» — всё равно берём ближайшую
-      if (!target) {
-        target = nearestCard(e.clientX, e.clientY);
-        if (target) mode = resolveMode(target, e.clientY);
-      }
-
-      if (target && target.dataset.id !== dragId && mode) {
-        payload = { fromId: dragId, toId: target.dataset.id, mode };
-      }
-    }
-
-    dragEl.classList.remove("dragging");
-    dragEl.style.transform = "";
-    clearHints();
-    dragEl = null;
-    dragId = null;
-    pointerId = null;
-    active = false;
-    lastTarget = null;
-    lastMode = null;
-
-    if (payload) onReorder(payload);
+    finish(true);
   }
 
-  listEl.addEventListener("pointerdown", onPointerDown);
-  listEl.addEventListener("pointermove", onPointerMove);
-  listEl.addEventListener("pointerup", onPointerUp);
-  listEl.addEventListener("pointercancel", onPointerUp);
+  function onPointerCancel(e) {
+    if (!dragEl || e.pointerId !== pointerId) return;
+    // тач часто шлёт cancel — всё равно пытаемся поставить по lastY
+    finish(true);
+  }
+
+  listEl.addEventListener("pointerdown", onPointerDown, { passive: false });
 
   return () => {
     listEl.removeEventListener("pointerdown", onPointerDown);
-    listEl.removeEventListener("pointermove", onPointerMove);
-    listEl.removeEventListener("pointerup", onPointerUp);
-    listEl.removeEventListener("pointercancel", onPointerUp);
+    document.removeEventListener("pointermove", onPointerMove);
+    document.removeEventListener("pointerup", onPointerUp);
+    document.removeEventListener("pointercancel", onPointerCancel);
   };
 }
