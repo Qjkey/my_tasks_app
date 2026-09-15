@@ -1,3 +1,7 @@
+/**
+ * Планер — UI на модели v2 (дни + lists в KV).
+ */
+
 import {
   DAYS,
   DAY_SHORT,
@@ -5,9 +9,12 @@ import {
   capitalize,
   dayNameFromDate,
   toDateKey,
-  buildDayTasks,
-} from "./parser.js";
-import { loadStore, saveStore, applyTemplate } from "./storage.js";
+  emptyStore,
+  resolveDayItems,
+  setItemStatus,
+  itemIsDone,
+} from "./model.js";
+import { loadStore, saveStore, applyTemplate, getCodeText } from "./storage.js";
 import { evaluateStreak, weekStatus, pluralDays } from "./streak.js";
 import { enableDragDrop } from "./dragdrop.js";
 
@@ -87,57 +94,28 @@ function syncTelegramChrome() {
   } catch (_) {}
 }
 
-/** Только календарная дата выбранного дня в ТЕКУЩЕЙ неделе (пн–вс). */
-function dateKeyForSelectedDay() {
-  const today = new Date();
-  const todayName = dayNameFromDate(today);
-  if (state.selectedDay === todayName) return toDateKey(today);
-
-  const jsToday = today.getDay();
-  const todayIdx = jsToday === 0 ? 6 : jsToday - 1;
-  const wantIdx = DAYS.indexOf(state.selectedDay);
-  const delta = wantIdx - todayIdx;
-  const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() + delta);
-  return toDateKey(d);
+function itemId(index) {
+  return `i${index}`;
 }
 
-function doneMap() {
-  const key = dateKeyForSelectedDay();
-  if (!state.store.completions[key]) state.store.completions[key] = {};
-  return state.store.completions[key];
+function subId(index, subIndex) {
+  return `i${index}_s${subIndex}`;
 }
 
-/** Пункты адаптивных списков — общие для всех дней и вкладки «Списки» */
-function isAdaptiveId(id) {
-  const s = String(id);
-  return s.startsWith("alist_") || s.startsWith("als_");
+function listViewId(listId) {
+  return `L${listId}`;
 }
 
-function isDone(id) {
-  if (isAdaptiveId(id)) {
-    return !!state.store.listCompletions?.[id];
-  }
-  return !!doneMap()[id];
+function listSubId(listId, subIndex) {
+  return `L${listId}_s${subIndex}`;
 }
 
-function setDone(id, value) {
-  if (isAdaptiveId(id)) {
-    if (!state.store.listCompletions) state.store.listCompletions = {};
-    if (value) state.store.listCompletions[id] = true;
-    else delete state.store.listCompletions[id];
-    return;
-  }
-  const map = doneMap();
-  if (value) map[id] = true;
-  else delete map[id];
-}
-
-function taskComplete(task) {
-  if (task.subtasks?.length) {
-    if (isDone(task.id)) return true;
-    return task.subtasks.every((s) => isDone(s.id));
-  }
-  return isDone(task.id);
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 function renderDayMenu() {
@@ -148,9 +126,16 @@ function renderDayMenu() {
   ).join("");
 }
 
-function infoBtn(id, hasDesc) {
-  if (!hasDesc || state.editMode) return "";
+/** info рядом с названием (когда есть стрелка) */
+function infoInline(id, hasDesc, placeTrailing) {
+  if (!hasDesc || state.editMode || placeTrailing) return "";
   return `<button type="button" class="info-btn" data-desc-toggle="${id}" aria-label="Описание">${INFO_ICON}</button>`;
+}
+
+/** info на месте стрелки (нет подзадач) */
+function infoTrailing(id, hasDesc) {
+  if (!hasDesc || state.editMode) return "";
+  return `<button type="button" class="info-btn trailing" data-desc-toggle="${id}" aria-label="Описание">${INFO_ICON}</button>`;
 }
 
 function descBlock(id, text) {
@@ -161,83 +146,88 @@ function descBlock(id, text) {
   </div>`;
 }
 
-function trailingAction(task, hasSubs) {
+function trailingSlot(opts) {
+  const { id, hasSubs, hasDesc, deleteAttr } = opts;
   if (state.editMode) {
-    return `<button type="button" class="delete-btn" data-delete="${task.id}" aria-label="Удалить">${DELETE_ICON}</button>`;
+    return `<button type="button" class="delete-btn" ${deleteAttr} aria-label="Удалить">${DELETE_ICON}</button>`;
   }
   if (hasSubs) {
-    return `<button type="button" class="expand-btn" data-expand="${task.id}" aria-label="Подзадачи">${CHEVRON_ICON}</button>`;
+    return `<button type="button" class="expand-btn" data-expand="${id}" aria-label="Подзадачи">${CHEVRON_ICON}</button>`;
+  }
+  if (hasDesc) {
+    return infoTrailing(id, true);
   }
   return `<span class="row-spacer"></span>`;
 }
 
 function renderTasks() {
   const list = $("#task-list");
-  const dateKey = dateKeyForSelectedDay();
-  const tasks = buildDayTasks(state.store, state.selectedDay, dateKey);
+  const items = resolveDayItems(state.store, state.selectedDay);
 
   $("#current-day-label").textContent = capitalize(state.selectedDay);
 
   if (state.editMode) {
-    for (const task of tasks) {
-      if (task.subtasks?.length) state.expanded.add(task.id);
+    for (const item of items) {
+      if (item.tasks?.length) state.expanded.add(itemId(item.index));
     }
   }
 
-  list.innerHTML = tasks
-    .map((task) => {
-      const hasSubs = task.subtasks?.length > 0;
-      const expanded = state.editMode ? hasSubs : state.expanded.has(task.id);
-      const done = taskComplete(task);
-      const leafDesc = !hasSubs && task.description ? task.description : "";
+  list.innerHTML = items
+    .map((item) => {
+      const id = itemId(item.index);
+      const hasSubs = item.tasks?.length > 0;
+      const expanded = state.editMode ? hasSubs : state.expanded.has(id);
+      const done = itemIsDone(item);
+      const desc = item.subtitle || "";
+      const showDesc = !!desc;
 
       const subs = hasSubs
         ? `<div class="subtasks"><div class="subtasks-inner">
-            ${task.subtasks
-              .map((s) => {
-                const subDesc = s.description || "";
-                return `<div class="sub-block" data-sub-wrap="${s.id}">
-                  <div class="task-row sub" data-sub-id="${s.id}" data-parent="${task.id}">
-                    <button type="button" class="check ${isDone(s.id) ? "done" : ""}" data-toggle="${s.id}" aria-label="Готово"></button>
+            ${item.tasks
+              .map((s, si) => {
+                const sid = subId(item.index, si);
+                const subDesc = s.subtitle || "";
+                const subDone = !!s.status;
+                return `<div class="sub-block" data-sub-wrap="${sid}">
+                  <div class="task-row sub" data-item-index="${item.index}" data-sub-index="${si}">
+                    <button type="button" class="check ${subDone ? "done" : ""}" data-toggle-item="${item.index}" data-toggle-sub="${si}" aria-label="Готово"></button>
                     <div class="title-wrap">
-                      <span class="task-title ${isDone(s.id) ? "done" : ""}">${escapeHtml(s.title)}</span>
-                      ${infoBtn(s.id, !!subDesc)}
+                      <span class="task-title ${subDone ? "done" : ""}">${escapeHtml(s.title)}</span>
                     </div>
                     ${
                       state.editMode
-                        ? `<button type="button" class="delete-btn sub-delete" data-delete-sub="${s.id}" data-parent="${task.id}" aria-label="Удалить подзадачу">${DELETE_ICON}</button>`
-                        : `<span class="row-spacer"></span>`
+                        ? `<button type="button" class="delete-btn sub-delete" data-delete-item="${item.index}" data-delete-sub="${si}" aria-label="Удалить подзадачу">${DELETE_ICON}</button>`
+                        : subDesc
+                          ? infoTrailing(sid, true)
+                          : `<span class="row-spacer"></span>`
                     }
                   </div>
-                  ${descBlock(s.id, subDesc)}
+                  ${descBlock(sid, subDesc)}
                 </div>`;
               })
               .join("")}
           </div></div>`
         : "";
 
-      return `<article class="task-card ${expanded ? "expanded" : ""}" data-id="${task.id}" data-kind="${task.kind}">
+      return `<article class="task-card ${expanded ? "expanded" : ""}" data-id="${id}" data-index="${item.index}" data-kind="${item.kind || "daily"}">
         <div class="task-row">
-          <button type="button" class="check ${done ? "done" : ""}" data-toggle="${task.id}" data-parent-toggle="${hasSubs ? "1" : ""}" aria-label="Готово"></button>
+          <button type="button" class="check ${done ? "done" : ""}" data-toggle-item="${item.index}" ${hasSubs ? 'data-parent-toggle="1"' : ""} aria-label="Готово"></button>
           <div class="title-wrap">
-            <span class="task-title ${done ? "done" : ""}">${escapeHtml(task.title)}</span>
-            ${infoBtn(task.id, !!leafDesc)}
+            <span class="task-title ${done ? "done" : ""}">${escapeHtml(item.title)}</span>
+            ${infoInline(id, showDesc, !hasSubs)}
           </div>
-          ${trailingAction(task, hasSubs)}
+          ${trailingSlot({
+            id,
+            hasSubs,
+            hasDesc: showDesc,
+            deleteAttr: `data-delete-item="${item.index}"`,
+          })}
         </div>
-        ${descBlock(task.id, leafDesc)}
+        ${descBlock(id, desc)}
         ${subs}
       </article>`;
     })
     .join("");
-}
-
-function escapeHtml(s) {
-  return String(s)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
 }
 
 function renderStreak() {
@@ -277,66 +267,73 @@ function setTab(tab) {
   syncTelegramChrome();
   if (tab === "streak") renderStreak();
   if (tab === "lists") renderLists();
+  if (tab === "week") renderTasks();
 }
 
 function renderLists() {
   const root = $("#lists-root");
   if (!root) return;
-  const lists = Object.values(state.store.lists || {}).sort(
-    (a, b) => Number(a.listId) - Number(b.listId)
+
+  const entries = Object.entries(state.store.lists || {}).sort(
+    (a, b) => Number(a[0]) - Number(b[0])
   );
 
-  if (!lists.length) {
+  if (!entries.length) {
     root.innerHTML = `<p class="lists-empty">Пока нет адаптивных списков.<br/>В коде после дней добавьте:<br/><code>[{1}] { Покупки }</code><br/><code>    - { Молоко }</code><br/>А в дне закрепите: <code>[{1}]</code></p>`;
     return;
   }
 
-  root.innerHTML = lists
-    .map((list) => {
-      const taskId = `alist_${list.listId}`;
-      const open = state.expanded.has(taskId) || state.expanded.has(`listview_${list.listId}`);
-      const subs = list.subtasks || [];
+  root.innerHTML = entries
+    .map(([listId, list]) => {
+      const id = listViewId(listId);
+      const open = state.expanded.has(id);
+      const tasks = list.tasks || [];
       const done =
-        !!isDone(taskId) ||
-        (subs.length > 0 && subs.every((s) => isDone(s.id)));
+        !!list.status || (tasks.length > 0 && tasks.every((t) => t.status));
 
-      return `<article class="task-card ${open ? "expanded" : ""}" data-id="${taskId}" data-kind="adaptive" data-list-id="${list.listId}">
+      return `<article class="task-card ${open ? "expanded" : ""}" data-id="${id}" data-list-id="${listId}" data-kind="list">
         <div class="task-row">
-          <button type="button" class="check ${done ? "done" : ""}" data-toggle="${taskId}" data-parent-toggle="1" aria-label="Готово"></button>
+          <button type="button" class="check ${done ? "done" : ""}" data-list-toggle="${listId}" data-parent-toggle="1" aria-label="Готово"></button>
           <div class="title-wrap">
-            <span class="list-badge-inline">[{${list.listId}}]</span>
             <span class="task-title ${done ? "done" : ""}">${escapeHtml(list.title)}</span>
+            ${infoInline(id, !!list.subtitle, tasks.length === 0)}
           </div>
-          <button type="button" class="expand-btn" data-expand="${taskId}" aria-label="Пункты">${CHEVRON_ICON}</button>
+          ${
+            tasks.length
+              ? `<button type="button" class="expand-btn" data-expand="${id}" aria-label="Пункты">${CHEVRON_ICON}</button>`
+              : list.subtitle
+                ? infoTrailing(id, true)
+                : `<span class="row-spacer"></span>`
+          }
         </div>
+        ${descBlock(id, list.subtitle || "")}
         <div class="subtasks"><div class="subtasks-inner">
           ${
-            subs
-              .map(
-                (s) => `<div class="task-row sub" data-sub-id="${s.id}" data-parent="${taskId}">
-                  <button type="button" class="check ${isDone(s.id) ? "done" : ""}" data-toggle="${s.id}" aria-label="Готово"></button>
-                  <div class="title-wrap">
-                    <span class="task-title ${isDone(s.id) ? "done" : ""}">${escapeHtml(s.title)}</span>
+            tasks
+              .map((s, si) => {
+                const sid = listSubId(listId, si);
+                const subDesc = s.subtitle || "";
+                return `<div class="sub-block">
+                  <div class="task-row sub" data-list-id="${listId}" data-sub-index="${si}">
+                    <button type="button" class="check ${s.status ? "done" : ""}" data-list-toggle="${listId}" data-list-sub="${si}" aria-label="Готово"></button>
+                    <div class="title-wrap">
+                      <span class="task-title ${s.status ? "done" : ""}">${escapeHtml(s.title)}</span>
+                    </div>
+                    ${
+                      subDesc
+                        ? infoTrailing(sid, true)
+                        : `<span class="row-spacer"></span>`
+                    }
                   </div>
-                  <span class="row-spacer"></span>
-                </div>`
-              )
+                  ${descBlock(sid, subDesc)}
+                </div>`;
+              })
               .join("") || `<p class="lists-empty soft">Пустой список</p>`
           }
         </div></div>
       </article>`;
     })
     .join("");
-}
-
-function listsAsTasks() {
-  return Object.values(state.store.lists || {}).map((list) => ({
-    id: `alist_${list.listId}`,
-    title: list.title,
-    kind: "adaptive",
-    listId: list.listId,
-    subtasks: (list.subtasks || []).map((s) => ({ ...s })),
-  }));
 }
 
 function toggleEdit(force) {
@@ -360,25 +357,22 @@ function playPressAnim(card) {
 }
 
 function refreshDoneUI() {
-  const dateKey = dateKeyForSelectedDay();
-  const tasks = buildDayTasks(state.store, state.selectedDay, dateKey);
-
-  for (const task of tasks) {
-    const card = $(`.task-card[data-id="${task.id}"]`);
+  const items = resolveDayItems(state.store, state.selectedDay);
+  for (const item of items) {
+    const card = $(`.task-card[data-index="${item.index}"]`);
     if (!card) continue;
-    const done = taskComplete(task);
+    const done = itemIsDone(item);
     const mainCheck = card.querySelector(":scope > .task-row .check");
     const mainTitle = card.querySelector(":scope > .task-row .task-title");
     mainCheck?.classList.toggle("done", done);
     mainTitle?.classList.toggle("done", done);
 
-    for (const s of task.subtasks || []) {
-      const row = card.querySelector(`.task-row.sub[data-sub-id="${s.id}"]`);
-      if (!row) continue;
-      const sd = isDone(s.id);
-      row.querySelector(".check")?.classList.toggle("done", sd);
-      row.querySelector(".task-title")?.classList.toggle("done", sd);
-    }
+    (item.tasks || []).forEach((s, si) => {
+      const row = card.querySelector(`.task-row.sub[data-sub-index="${si}"]`);
+      if (!row) return;
+      row.querySelector(".check")?.classList.toggle("done", !!s.status);
+      row.querySelector(".task-title")?.classList.toggle("done", !!s.status);
+    });
   }
 }
 
@@ -417,82 +411,41 @@ function addTask(title, description = "") {
   title = title.trim();
   if (!title) return;
   description = String(description || "").trim().slice(0, DESC_MAX);
-  const dateKey = dateKeyForSelectedDay();
-  if (!state.store.extraTasks[dateKey]) state.store.extraTasks[dateKey] = [];
-
-  const task = {
-    id: `extra_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
+  const day = state.selectedDay;
+  if (!state.store[day]) state.store[day] = [];
+  state.store[day].unshift({
     title,
-    description,
+    subtitle: description,
+    status: 0,
     kind: "once",
-    subtasks: [],
-  };
-  state.store.extraTasks[dateKey].unshift(task);
-
-  const tasks = buildDayTasks(state.store, state.selectedDay, dateKey);
-  state.store.order[dateKey] = tasks.map((t) => t.id);
-
+    tasks: [],
+  });
   renderTasks();
   persist();
 }
 
-function deleteTask(taskId) {
-  const dateKey = dateKeyForSelectedDay();
-  const dayName = state.selectedDay;
-  const tasks = buildDayTasks(state.store, dayName, dateKey);
-  const task = tasks.find((t) => t.id === taskId);
-  if (!task) return;
-
-  // completions не трогаем — история выполнения сохраняется
-  delete state.store.onceDone[taskId];
-
-  removeTaskFromSources(taskId, dateKey, dayName);
-  // listref: order может держать alist_ id
-  if (task.listId) {
-    removeTaskFromSources(`alist_${task.listId}`, dateKey, dayName);
-  }
-  state.expanded.delete(taskId);
-  state.descOpen.delete(taskId);
-
-  const remaining = buildDayTasks(state.store, dayName, dateKey);
-  state.store.order[dateKey] = remaining.map((t) => t.id);
-
+function deleteItem(index) {
+  const day = state.selectedDay;
+  const arr = state.store[day] || [];
+  if (index < 0 || index >= arr.length) return;
+  arr.splice(index, 1);
+  state.expanded.clear();
+  state.descOpen.clear();
   renderTasks();
   persist();
   tg()?.HapticFeedback?.impactOccurred?.("medium");
 }
 
-function deleteSubtask(parentId, subId) {
-  const dateKey = dateKeyForSelectedDay();
-  const dayName = state.selectedDay;
+function deleteSub(itemIndex, subIndex) {
+  const day = state.selectedDay;
+  const raw = state.store[day]?.[itemIndex];
+  if (!raw) return;
 
-  state.descOpen.delete(subId);
-
-  // adaptive list — правим библиотеку
-  const parentTask = buildDayTasks(state.store, dayName, dateKey).find(
-    (t) => t.id === parentId
-  );
-  if (parentTask?.kind === "adaptive" && parentTask.listId) {
-    const lib = state.store.lists?.[parentTask.listId];
-    if (lib) {
-      lib.subtasks = (lib.subtasks || []).filter((s) => s.id !== subId);
-    }
-    renderTasks();
-    persist();
-    tg()?.HapticFeedback?.impactOccurred?.("medium");
-    return;
-  }
-
-  const extras = state.store.extraTasks[dateKey] || [];
-  const ei = extras.findIndex((t) => t.id === parentId);
-  if (ei >= 0) {
-    extras[ei].subtasks = (extras[ei].subtasks || []).filter((s) => s.id !== subId);
-  } else {
-    const dayList = state.store.days[dayName] || [];
-    const di = dayList.findIndex((t) => t.id === parentId);
-    if (di >= 0) {
-      dayList[di].subtasks = (dayList[di].subtasks || []).filter((s) => s.id !== subId);
-    }
+  if (raw.kind === "listref" && raw.listId != null) {
+    const list = state.store.lists?.[String(raw.listId)];
+    if (list?.tasks) list.tasks.splice(subIndex, 1);
+  } else if (raw.tasks) {
+    raw.tasks.splice(subIndex, 1);
   }
 
   renderTasks();
@@ -501,70 +454,80 @@ function deleteSubtask(parentId, subId) {
 }
 
 function handleReorder({ fromId, toId, mode }) {
-  const dateKey = dateKeyForSelectedDay();
-  const dayName = state.selectedDay;
-  let tasks = buildDayTasks(state.store, dayName, dateKey);
-  const fromIdx = tasks.findIndex((t) => t.id === fromId);
-  const toIdx = tasks.findIndex((t) => t.id === toId);
-  if (fromIdx < 0 || toIdx < 0) return;
+  const day = state.selectedDay;
+  const arr = state.store[day] || [];
+  const fromIdx = Number(String(fromId).replace(/^i/, ""));
+  const toIdx = Number(String(toId).replace(/^i/, ""));
+  if (Number.isNaN(fromIdx) || Number.isNaN(toIdx)) return;
+  if (fromIdx < 0 || toIdx < 0 || fromIdx >= arr.length || toIdx >= arr.length) return;
 
-  const [moved] = tasks.splice(fromIdx, 1);
+  const [moved] = arr.splice(fromIdx, 1);
+  // индексы после splice сдвигаются
+  let targetIdx = toIdx;
+  if (fromIdx < toIdx) targetIdx = toIdx - 1;
 
   if (mode === "into") {
-    const parent = tasks.find((t) => t.id === toId);
-    if (!parent) return;
-    if (!parent.subtasks) parent.subtasks = [];
-    parent.subtasks.push({
-      id: moved.id,
-      title: moved.title,
-      description: moved.description || "",
-    });
-    for (const s of moved.subtasks || []) parent.subtasks.push(s);
-    removeTaskFromSources(fromId, dateKey, dayName);
-    syncParentSubtasks(parent, dateKey, dayName);
-    state.store.order[dateKey] = tasks.map((t) => t.id);
+    const parent = arr[targetIdx];
+    if (!parent) {
+      arr.splice(fromIdx, 0, moved);
+      return;
+    }
+    if (parent.kind === "listref" && parent.listId != null) {
+      const list = state.store.lists?.[String(parent.listId)];
+      if (!list) {
+        arr.splice(fromIdx, 0, moved);
+        return;
+      }
+      if (!list.tasks) list.tasks = [];
+      list.tasks.push({
+        title: moved.title,
+        subtitle: moved.subtitle || "",
+        status: moved.status ? 1 : 0,
+      });
+      for (const t of moved.tasks || []) {
+        list.tasks.push({
+          title: t.title,
+          subtitle: t.subtitle || "",
+          status: t.status ? 1 : 0,
+        });
+      }
+    } else {
+      if (!parent.tasks) parent.tasks = [];
+      parent.kind = parent.kind === "listref" ? parent.kind : "group";
+      parent.tasks.push({
+        title: moved.title,
+        subtitle: moved.subtitle || "",
+        status: moved.status ? 1 : 0,
+      });
+      for (const t of moved.tasks || []) {
+        parent.tasks.push({
+          title: t.title,
+          subtitle: t.subtitle || "",
+          status: t.status ? 1 : 0,
+        });
+      }
+    }
+    state.expanded.add(itemId(targetIdx));
   } else {
-    let insertAt = tasks.findIndex((t) => t.id === toId);
+    let insertAt = targetIdx;
     if (mode === "after") insertAt += 1;
-    tasks.splice(insertAt, 0, moved);
-    state.store.order[dateKey] = tasks.map((t) => t.id);
+    arr.splice(insertAt, 0, moved);
   }
-
-  if (mode === "into") state.expanded.add(toId);
 
   renderTasks();
   persist();
 }
 
-function removeTaskFromSources(taskId, dateKey, dayName) {
-  const extras = state.store.extraTasks[dateKey] || [];
-  state.store.extraTasks[dateKey] = extras.filter((t) => t.id !== taskId);
-
-  let dayList = state.store.days[dayName] || [];
-  dayList = dayList.filter((t) => t.id !== taskId);
-  if (String(taskId).startsWith("alist_")) {
-    const listId = String(taskId).slice("alist_".length);
-    dayList = dayList.filter(
-      (t) => !(t.kind === "listref" && String(t.listId) === listId)
-    );
+function setListStatus(listId, status, subIndex = null) {
+  const list = state.store.lists?.[String(listId)];
+  if (!list) return;
+  if (subIndex == null) {
+    list.status = status ? 1 : 0;
+    for (const t of list.tasks || []) t.status = status ? 1 : 0;
+  } else if (list.tasks?.[subIndex]) {
+    list.tasks[subIndex].status = status ? 1 : 0;
+    list.status = list.tasks.every((t) => t.status) ? 1 : 0;
   }
-  state.store.days[dayName] = dayList;
-
-  if (state.store.order[dateKey]) {
-    state.store.order[dateKey] = state.store.order[dateKey].filter((id) => id !== taskId);
-  }
-}
-
-function syncParentSubtasks(parent, dateKey, dayName) {
-  const extras = state.store.extraTasks[dateKey] || [];
-  const ei = extras.findIndex((t) => t.id === parent.id);
-  if (ei >= 0) {
-    extras[ei].subtasks = parent.subtasks;
-    return;
-  }
-  const dayList = state.store.days[dayName] || [];
-  const di = dayList.findIndex((t) => t.id === parent.id);
-  if (di >= 0) dayList[di].subtasks = parent.subtasks;
 }
 
 function bindEvents() {
@@ -601,14 +564,14 @@ function bindEvents() {
     const delSub = e.target.closest("[data-delete-sub]");
     if (delSub) {
       e.stopPropagation();
-      deleteSubtask(delSub.dataset.parent, delSub.dataset.deleteSub);
+      deleteSub(Number(delSub.dataset.deleteItem), Number(delSub.dataset.deleteSub));
       return;
     }
 
-    const del = e.target.closest("[data-delete]");
-    if (del) {
+    const del = e.target.closest("[data-delete-item]");
+    if (del && !del.dataset.deleteSub) {
       e.stopPropagation();
-      deleteTask(del.dataset.delete);
+      deleteItem(Number(del.dataset.deleteItem));
       return;
     }
 
@@ -641,42 +604,29 @@ function bindEvents() {
       return;
     }
 
-    const toggle = e.target.closest("[data-toggle]");
+    const toggle = e.target.closest("[data-toggle-item]");
     if (toggle) {
-      const id = toggle.dataset.toggle;
-      const parentToggle = toggle.dataset.parentToggle === "1";
-      const dateKey = dateKeyForSelectedDay();
-      const tasks = buildDayTasks(state.store, state.selectedDay, dateKey);
-      const task = tasks.find((t) => t.id === id);
+      const index = Number(toggle.dataset.toggleItem);
+      const sub = toggle.dataset.toggleSub;
+      const items = resolveDayItems(state.store, state.selectedDay);
+      const item = items.find((t) => t.index === index);
+      if (!item) return;
 
-      if (parentToggle && task?.subtasks?.length) {
-        const next = !taskComplete(task);
-        for (const s of task.subtasks) setDone(s.id, next);
-        setDone(task.id, next);
+      if (toggle.dataset.parentToggle === "1" && item.tasks?.length && sub == null) {
+        const next = !itemIsDone(item);
+        setItemStatus(state.store, state.selectedDay, index, next ? 1 : 0);
+      } else if (sub != null) {
+        const si = Number(sub);
+        const cur = !!item.tasks?.[si]?.status;
+        setItemStatus(state.store, state.selectedDay, index, cur ? 0 : 1, si);
       } else {
-        setDone(id, !isDone(id));
-        const parentRow = toggle.closest("[data-parent]");
-        if (parentRow) {
-          const parentId = parentRow.dataset.parent;
-          const parent = tasks.find((t) => t.id === parentId);
-          if (parent) setDone(parent.id, taskComplete(parent));
-        } else if (task?.subtasks?.length) {
-          const next = isDone(id);
-          for (const s of task.subtasks) setDone(s.id, next);
-        }
-      }
-
-      const root =
-        tasks.find((t) => t.id === id) ||
-        tasks.find((t) => t.subtasks?.some((s) => s.id === id));
-      if (root?.kind === "once" && taskComplete(root)) {
-        state.store.onceDone[root.id] = dateKey;
+        const next = !itemIsDone(item);
+        setItemStatus(state.store, state.selectedDay, index, next ? 1 : 0);
       }
 
       if (card) playPressAnim(card);
       refreshDoneUI();
-      // синхрон с вкладкой списков (адаптивные — глобальные)
-      if (isAdaptiveId(id) || root?.kind === "adaptive") {
+      if (item.fromList || item.kind === "listref") {
         if (state.tab === "lists") renderLists();
       }
       persist();
@@ -685,6 +635,17 @@ function bindEvents() {
   });
 
   $("#lists-root")?.addEventListener("click", (e) => {
+    const descToggle = e.target.closest("[data-desc-toggle]");
+    if (descToggle) {
+      e.stopPropagation();
+      const id = descToggle.dataset.descToggle;
+      if (state.descOpen.has(id)) state.descOpen.delete(id);
+      else state.descOpen.add(id);
+      const block = $(`.task-desc[data-desc-for="${id}"]`);
+      if (block) block.classList.toggle("open", state.descOpen.has(id));
+      return;
+    }
+
     const expand = e.target.closest("[data-expand]");
     if (expand) {
       const id = expand.dataset.expand;
@@ -696,33 +657,28 @@ function bindEvents() {
       return;
     }
 
-    const toggle = e.target.closest("[data-toggle]");
+    const toggle = e.target.closest("[data-list-toggle]");
     if (!toggle) return;
 
-    const id = toggle.dataset.toggle;
-    const parentToggle = toggle.dataset.parentToggle === "1";
-    const tasks = listsAsTasks();
-    const task = tasks.find((t) => t.id === id);
+    const listId = toggle.dataset.listToggle;
+    const list = state.store.lists?.[String(listId)];
+    if (!list) return;
     const card = e.target.closest(".task-card");
+    const sub = toggle.dataset.listSub;
 
-    if (parentToggle && task?.subtasks?.length) {
-      const next = !taskComplete(task);
-      for (const s of task.subtasks) setDone(s.id, next);
-      setDone(task.id, next);
-    } else {
-      setDone(id, !isDone(id));
-      const parentRow = toggle.closest("[data-parent]");
-      if (parentRow) {
-        const parentId = parentRow.dataset.parent;
-        const parent = tasks.find((t) => t.id === parentId);
-        if (parent) setDone(parent.id, taskComplete(parent));
-      }
+    if (toggle.dataset.parentToggle === "1" && sub == null) {
+      const tasks = list.tasks || [];
+      const done = !!list.status || (tasks.length > 0 && tasks.every((t) => t.status));
+      setListStatus(listId, done ? 0 : 1);
+    } else if (sub != null) {
+      const si = Number(sub);
+      const cur = !!list.tasks?.[si]?.status;
+      setListStatus(listId, cur ? 0 : 1, si);
     }
 
     if (card) playPressAnim(card);
     renderLists();
-    // обновить день, если там закреплён этот список
-    if (state.tab === "week") refreshDoneUI();
+    refreshDoneUI();
     persist();
     tg()?.HapticFeedback?.impactOccurred?.("light");
   });
@@ -746,7 +702,7 @@ function bindEvents() {
   });
 
   $("#btn-paste-code").addEventListener("click", () => {
-    $("#code-textarea").value = state.store.template || "";
+    $("#code-textarea").value = getCodeText(state.store);
     openModal("modal-code");
   });
 
@@ -756,6 +712,7 @@ function bindEvents() {
     closeModal("modal-code");
     toggleEdit(false);
     renderTasks();
+    if (state.tab === "lists") renderLists();
     await persist();
     tg()?.HapticFeedback?.notificationOccurred?.("success");
   });
@@ -770,7 +727,7 @@ async function boot() {
     state.store = await loadStore();
   } catch (err) {
     console.error(err);
-    state.store = (await import("./parser.js")).emptyStore();
+    state.store = emptyStore();
     tg()?.showAlert?.(
       "Не удалось загрузить данные из KV. Проверьте binding PLANER_KV и передеплойте сайт."
     );

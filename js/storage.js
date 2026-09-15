@@ -1,9 +1,16 @@
 /**
- * Хранилище только через Cloudflare KV (/api/data).
- * Без localStorage.
+ * Cloudflare KV — store v2 (дни + lists + streak).
  */
 
-import { emptyStore, parseTaskCode } from "./parser.js";
+import {
+  emptyStore,
+  parseTaskCode,
+  applyCode,
+  serializeToCode,
+  migrateFromV1,
+  isV2,
+  DAYS,
+} from "./model.js";
 
 function tg() {
   return window.Telegram?.WebApp || null;
@@ -24,9 +31,7 @@ function userQuery() {
 
 async function apiGet() {
   const res = await fetch(`/api/data${userQuery()}`, { headers: headers() });
-  if (!res.ok) {
-    throw new Error(`KV read failed: ${res.status}`);
-  }
+  if (!res.ok) throw new Error(`KV read failed: ${res.status}`);
   return res.json();
 }
 
@@ -36,28 +41,56 @@ async function apiPut(store) {
     headers: headers(),
     body: JSON.stringify(store),
   });
-  if (!res.ok) {
-    throw new Error(`KV write failed: ${res.status}`);
-  }
+  if (!res.ok) throw new Error(`KV write failed: ${res.status}`);
   return res.json();
+}
+
+function normalize(data) {
+  if (!data) return emptyStore();
+  if (isV2(data) && data.version === 2) {
+    const store = emptyStore();
+    for (const d of DAYS) store[d] = Array.isArray(data[d]) ? data[d] : [];
+    store.lists = data.lists || {};
+    store.streak = { ...store.streak, ...(data.streak || {}) };
+    store.version = 2;
+    store.updatedAt = data.updatedAt || null;
+    return store;
+  }
+  // v1 → v2
+  if (data.days || data.template || data.completions || data.extraTasks) {
+    return migrateFromV1(data);
+  }
+  // already day-keyed without version
+  if (DAYS.some((d) => Array.isArray(data[d]))) {
+    const store = emptyStore();
+    for (const d of DAYS) store[d] = Array.isArray(data[d]) ? data[d] : [];
+    store.lists = data.lists || {};
+    store.streak = { ...store.streak, ...(data.streak || {}) };
+    store.version = 2;
+    return store;
+  }
+  return migrateFromV1(data);
 }
 
 export async function loadStore() {
   const payload = await apiGet();
   if (payload.exists && payload.data) {
-    return migrate(payload.data);
+    const store = normalize(payload.data);
+    // сразу сохранить в новом формате, если была миграция
+    if (payload.data.version !== 2) {
+      try {
+        await saveStore(store);
+      } catch (_) {}
+    }
+    return store;
   }
 
-  // Пустая KV — один раз засеять пример и сохранить в KV
   try {
     const res = await fetch("./tasks.example.txt");
     if (res.ok) {
       const text = await res.text();
       const store = emptyStore();
-      const parsed = parseTaskCode(text);
-      store.template = parsed.template;
-      store.days = parsed.days;
-      store.lists = parsed.lists || {};
+      applyCode(store, text);
       await saveStore(store);
       return store;
     }
@@ -67,40 +100,27 @@ export async function loadStore() {
 }
 
 export async function saveStore(store) {
+  store.version = 2;
   store.updatedAt = new Date().toISOString();
-  await apiPut(store);
-}
-
-function migrate(data) {
-  const base = emptyStore();
-  const order = { ...(data.order || {}) };
-  // убрать порядок по имени дня — он путал недели
-  for (const key of Object.keys(order)) {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) delete order[key];
-  }
-  return {
-    ...base,
-    ...data,
-    days: { ...base.days, ...(data.days || {}) },
-    lists: { ...(data.lists || {}) },
-    completions: data.completions || {},
-    listCompletions: data.listCompletions || {},
-    onceDone: data.onceDone || {},
-    extraTasks: data.extraTasks || {},
-    order,
-    streak: { ...base.streak, ...(data.streak || {}) },
-    meta: { ...(data.meta || {}) },
-  };
+  // убрать legacy-поля если вдруг остались
+  const clean = emptyStore();
+  for (const d of DAYS) clean[d] = store[d] || [];
+  clean.lists = store.lists || {};
+  clean.streak = store.streak || clean.streak;
+  clean.version = 2;
+  clean.updatedAt = store.updatedAt;
+  await apiPut(clean);
+  // синхронизировать ссылку
+  Object.assign(store, clean);
 }
 
 export function applyTemplate(store, codeText) {
-  const parsed = parseTaskCode(codeText);
-  store.template = parsed.template;
-  store.days = parsed.days;
-  store.lists = parsed.lists || {};
-  // completions / onceDone / streak.history НЕ трогаем
-  for (const key of Object.keys(store.order || {})) {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) delete store.order[key];
-  }
+  applyCode(store, codeText);
   return store;
 }
+
+export function getCodeText(store) {
+  return serializeToCode(store);
+}
+
+export { parseTaskCode, serializeToCode };

@@ -369,6 +369,12 @@ textarea {
   opacity: 0.75;
 }
 
+.info-btn.trailing {
+  width: 32px;
+  height: 32px;
+  margin: 0 auto;
+}
+
 .info-btn:active {
   opacity: 1;
   transform: scale(0.92);
