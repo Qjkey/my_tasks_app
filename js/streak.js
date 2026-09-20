@@ -1,5 +1,12 @@
 /**
- * Огонёк — по status в днях (listref не учитывается).
+ * Огонёк — история по календарным датам (listref не учитывается).
+ *
+ * Правила:
+ * - Успех дня пишется в streak.history[YYYY-MM-DD] когда все обязательные задачи дня выполнены.
+ * - Пока сегодняшний день не закрыт, серия считается от вчера (не сбрасывается утром).
+ * - Если вчерашний участвующий день не в history — серия = 0.
+ * - Точки недели: past/today из history; адаптивные списки не влияют.
+ * - Статусы задач дней сбрасываются при наступлении новой недели (пн).
  */
 
 import {
@@ -24,32 +31,74 @@ export function isDayFullyDone(store, dayName) {
   return req.every((t) => itemIsDone(t));
 }
 
-export function dayWasSuccess(store, dateKey) {
-  return store.streak?.history?.[dateKey] === true;
-}
-
 function dayParticipates(store, dateKey) {
   const [y, m, d] = dateKey.split("-").map(Number);
   const dayName = dayNameFromDate(new Date(y, m - 1, d));
   return requiredItems(store, dayName).length > 0;
 }
 
-export function evaluateStreak(store, today = new Date()) {
+function ensureStreak(store) {
   if (!store.streak) {
-    store.streak = { count: 0, lastSuccessDate: null, history: {} };
+    store.streak = { count: 0, lastSuccessDate: null, history: {}, statusWeek: null };
   }
   if (!store.streak.history) store.streak.history = {};
+}
 
+/**
+ * Новая календарная неделя → обнулить status у задач дней (не lists).
+ * Первый запуск без statusWeek — только зафиксировать неделю, без сброса.
+ */
+export function ensureWeekTaskStatuses(store, today = new Date()) {
+  ensureStreak(store);
+  const weekKey = toDateKey(startOfWeek(today));
+  if (!store.streak.statusWeek) {
+    store.streak.statusWeek = weekKey;
+    return false;
+  }
+  if (store.streak.statusWeek === weekKey) return false;
+
+  for (const day of DAYS) {
+    for (const item of store[day] || []) {
+      if (item.kind === "listref") continue;
+      item.status = 0;
+      for (const t of item.tasks || []) t.status = 0;
+    }
+  }
+  store.streak.statusWeek = weekKey;
+  return true;
+}
+
+/** Синхронизировать history за сегодня с живыми статусами */
+function syncTodayHistory(store, today = new Date()) {
   const todayKey = toDateKey(today);
   const todayName = dayNameFromDate(today);
 
-  if (dayParticipates(store, todayKey) && isDayFullyDone(store, todayName)) {
-    store.streak.history[todayKey] = true;
+  if (!dayParticipates(store, todayKey)) {
+    delete store.streak.history[todayKey];
+    return;
   }
+
+  if (isDayFullyDone(store, todayName)) {
+    store.streak.history[todayKey] = true;
+  } else {
+    delete store.streak.history[todayKey];
+  }
+}
+
+export function evaluateStreak(store, today = new Date()) {
+  ensureStreak(store);
+  ensureWeekTaskStatuses(store, today);
+  syncTodayHistory(store, today);
+
+  const todayKey = toDateKey(today);
+  const yesterday = addDays(today, -1);
+
+  // Если сегодня ещё не закрыт — серия держится на вчерашнем успехе
+  let cursor =
+    store.streak.history[todayKey] === true ? today : yesterday;
 
   let count = 0;
   let last = null;
-  let cursor = today;
 
   for (let i = 0; i < 400; i++) {
     const key = toDateKey(cursor);
@@ -57,10 +106,7 @@ export function evaluateStreak(store, today = new Date()) {
       cursor = addDays(cursor, -1);
       continue;
     }
-    const success =
-      store.streak.history[key] === true ||
-      (key === todayKey && isDayFullyDone(store, todayName));
-    if (!success) break;
+    if (store.streak.history[key] !== true) break;
     count += 1;
     if (!last) last = key;
     cursor = addDays(cursor, -1);
@@ -72,6 +118,10 @@ export function evaluateStreak(store, today = new Date()) {
 }
 
 export function weekStatus(store, today = new Date()) {
+  ensureStreak(store);
+  ensureWeekTaskStatuses(store, today);
+  syncTodayHistory(store, today);
+
   const start = startOfWeek(today);
   const todayKey = toDateKey(today);
   const result = [];
@@ -79,15 +129,11 @@ export function weekStatus(store, today = new Date()) {
   for (let i = 0; i < 7; i++) {
     const d = addDays(start, i);
     const key = toDateKey(d);
-    const dayName = DAYS[i];
     let status = "future";
 
     if (key > todayKey) {
       status = "future";
-    } else if (
-      store.streak?.history?.[key] === true ||
-      (key === todayKey && isDayFullyDone(store, dayName))
-    ) {
+    } else if (store.streak.history[key] === true) {
       status = "done";
     } else if (key < todayKey) {
       status = "missed";

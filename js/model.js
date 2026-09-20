@@ -86,7 +86,7 @@ export function emptyStore() {
   const store = {
     version: 2,
     lists: {},
-    streak: { count: 0, lastSuccessDate: null, history: {} },
+    streak: { count: 0, lastSuccessDate: null, history: {}, statusWeek: null },
     updatedAt: null,
   };
   for (const d of DAYS) store[d] = [];
@@ -297,6 +297,10 @@ export function resolveDayItems(store, dayName) {
 }
 
 export function itemIsDone(item) {
+  // Адаптивный список: галочка родителя независима от пунктов
+  if (item.kind === "listref" || item.fromList) {
+    return !!item.status;
+  }
   if (item.tasks?.length) {
     if (item.status) return true;
     return item.tasks.every((t) => !!t.status);
@@ -304,7 +308,7 @@ export function itemIsDone(item) {
   return !!item.status;
 }
 
-/** Обновить status; для listref пишет в store.lists */
+/** Обновить status; для listref пишет в store.lists (без каскада на пункты) */
 export function setItemStatus(store, dayName, itemIndex, status, subIndex = null) {
   const raw = store[dayName]?.[itemIndex];
   if (!raw) return;
@@ -314,10 +318,10 @@ export function setItemStatus(store, dayName, itemIndex, status, subIndex = null
     if (!list) return;
     if (subIndex == null) {
       list.status = status ? 1 : 0;
-      for (const t of list.tasks || []) t.status = status ? 1 : 0;
+      // пункты не трогаем
     } else if (list.tasks?.[subIndex]) {
       list.tasks[subIndex].status = status ? 1 : 0;
-      list.status = list.tasks.every((t) => t.status) ? 1 : 0;
+      // статус родителя не синхронизируем с пунктами
     }
     return;
   }
@@ -353,26 +357,18 @@ function mergeItemStatus(prev, next) {
 }
 
 /**
- * Применить код: сохранить статусы по совпадению title / listId.
+ * Применить код: полная перезапись дней и списков.
+ * Статусы сохраняются только у совпавших по title / listId.
  */
 export function applyCode(store, codeText) {
   const parsed = parseTaskCode(codeText);
   for (const day of DAYS) {
     const prev = store[day] || [];
     store[day] = (parsed.days[day] || []).map((item) => {
-      if (item.kind === "listref") {
-        const p = prev.find((x) => x.kind === "listref" && String(x.listId) === String(item.listId));
-        return p ? { ...item } : item;
-      }
+      if (item.kind === "listref") return { ...item };
       const p = prev.find((x) => x.kind !== "listref" && x.title === item.title);
       return mergeItemStatus(p, item);
     });
-    // задачи, которые были только в UI и пропали из кода — оставляем в конце
-    for (const p of prev) {
-      if (p.kind === "listref") continue;
-      const still = store[day].some((x) => x.kind !== "listref" && x.title === p.title);
-      if (!still) store[day].push({ ...p });
-    }
   }
 
   const prevLists = store.lists || {};
@@ -386,7 +382,7 @@ export function applyCode(store, codeText) {
     const byTitle = new Map((prev.tasks || []).map((t) => [t.title, t]));
     nextLists[id] = {
       title: list.title,
-      subtitle: list.subtitle || prev.subtitle || "",
+      subtitle: list.subtitle || "",
       status: prev.status ? 1 : 0,
       tasks: (list.tasks || []).map((t) => {
         const p = byTitle.get(t.title);
@@ -397,16 +393,6 @@ export function applyCode(store, codeText) {
         };
       }),
     };
-    // старые пункты списка, которых нет в коде — сохраняем
-    for (const p of prev.tasks || []) {
-      if (!nextLists[id].tasks.some((t) => t.title === p.title)) {
-        nextLists[id].tasks.push({ ...p });
-      }
-    }
-  }
-  // списки только из UI (не в коде) — сохраняем
-  for (const [id, list] of Object.entries(prevLists)) {
-    if (!nextLists[id]) nextLists[id] = list;
   }
   store.lists = nextLists;
   return store;

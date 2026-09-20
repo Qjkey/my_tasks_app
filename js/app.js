@@ -15,7 +15,7 @@ import {
   itemIsDone,
 } from "./model.js";
 import { loadStore, saveStore, applyTemplate, getCodeText } from "./storage.js";
-import { evaluateStreak, weekStatus, pluralDays } from "./streak.js";
+import { evaluateStreak, weekStatus, pluralDays, ensureWeekTaskStatuses } from "./streak.js";
 import { enableDragDrop } from "./dragdrop.js";
 
 const DELETE_ICON = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
@@ -35,6 +35,8 @@ const state = {
   store: null,
   selectedDay: dayNameFromDate(new Date()),
   editMode: false,
+  listsEditMode: false,
+  addTarget: null, // null = day task; { listId } = list subtask
   expanded: new Set(),
   descOpen: new Set(),
   tab: "week",
@@ -128,13 +130,13 @@ function renderDayMenu() {
 
 /** info рядом с названием (когда есть стрелка) */
 function infoInline(id, hasDesc, placeTrailing) {
-  if (!hasDesc || state.editMode || placeTrailing) return "";
+  if (!hasDesc || state.editMode || state.listsEditMode || placeTrailing) return "";
   return `<button type="button" class="info-btn" data-desc-toggle="${id}" aria-label="Описание">${INFO_ICON}</button>`;
 }
 
 /** info на месте стрелки (нет подзадач) */
 function infoTrailing(id, hasDesc) {
-  if (!hasDesc || state.editMode) return "";
+  if (!hasDesc || state.editMode || state.listsEditMode) return "";
   return `<button type="button" class="info-btn trailing" data-desc-toggle="${id}" aria-label="Описание">${INFO_ICON}</button>`;
 }
 
@@ -147,17 +149,27 @@ function descBlock(id, text) {
 }
 
 function trailingSlot(opts) {
-  const { id, hasSubs, hasDesc, deleteAttr } = opts;
+  const { id, hasSubs, hasDesc, deleteAttr, doneCount, total } = opts;
   if (state.editMode) {
     return `<button type="button" class="delete-btn" ${deleteAttr} aria-label="Удалить">${DELETE_ICON}</button>`;
   }
   if (hasSubs) {
-    return `<button type="button" class="expand-btn" data-expand="${id}" aria-label="Подзадачи">${CHEVRON_ICON}</button>`;
+    const progClass = doneCount >= total ? "complete" : "";
+    return `<div class="row-trailing">
+      <span class="sub-progress ${progClass}">${doneCount}/${total}</span>
+      <button type="button" class="expand-btn" data-expand="${id}" aria-label="Подзадачи">${CHEVRON_ICON}</button>
+    </div>`;
   }
   if (hasDesc) {
     return infoTrailing(id, true);
   }
   return `<span class="row-spacer"></span>`;
+}
+
+function subProgress(tasks) {
+  const total = tasks?.length || 0;
+  const doneCount = (tasks || []).filter((t) => t.status).length;
+  return { doneCount, total };
 }
 
 function renderTasks() {
@@ -180,6 +192,7 @@ function renderTasks() {
       const done = itemIsDone(item);
       const desc = item.subtitle || "";
       const showDesc = !!desc;
+      const { doneCount, total } = subProgress(item.tasks);
 
       const subs = hasSubs
         ? `<div class="subtasks"><div class="subtasks-inner">
@@ -221,6 +234,8 @@ function renderTasks() {
             hasSubs,
             hasDesc: showDesc,
             deleteAttr: `data-delete-item="${item.index}"`,
+            doneCount,
+            total,
           })}
         </div>
         ${descBlock(id, desc)}
@@ -261,6 +276,8 @@ function renderStreak() {
 
 function setTab(tab) {
   state.tab = tab;
+  if (tab !== "lists" && state.listsEditMode) toggleListsEdit(false);
+  if (tab !== "week" && state.editMode) toggleEdit(false);
   $("#tab-week")?.classList.toggle("active", tab === "week");
   $("#tab-streak")?.classList.toggle("active", tab === "streak");
   $("#tab-lists")?.classList.toggle("active", tab === "lists");
@@ -283,27 +300,39 @@ function renderLists() {
     return;
   }
 
+  if (state.listsEditMode) {
+    for (const [listId] of entries) {
+      state.expanded.add(listViewId(listId));
+    }
+  }
+
   root.innerHTML = entries
     .map(([listId, list]) => {
       const id = listViewId(listId);
-      const open = state.expanded.has(id);
+      const open = state.listsEditMode || state.expanded.has(id);
       const tasks = list.tasks || [];
-      const done =
-        !!list.status || (tasks.length > 0 && tasks.every((t) => t.status));
+      const done = !!list.status;
+      const { doneCount, total } = subProgress(tasks);
+      const hasSubs = tasks.length > 0;
 
       return `<article class="task-card ${open ? "expanded" : ""}" data-id="${id}" data-list-id="${listId}" data-kind="list">
         <div class="task-row">
           <button type="button" class="check ${done ? "done" : ""}" data-list-toggle="${listId}" data-parent-toggle="1" aria-label="Готово"></button>
           <div class="title-wrap">
             <span class="task-title ${done ? "done" : ""}">${escapeHtml(list.title)}</span>
-            ${infoInline(id, !!list.subtitle, tasks.length === 0)}
+            ${infoInline(id, !!list.subtitle, !hasSubs || state.listsEditMode)}
           </div>
           ${
-            tasks.length
-              ? `<button type="button" class="expand-btn" data-expand="${id}" aria-label="Пункты">${CHEVRON_ICON}</button>`
-              : list.subtitle
-                ? infoTrailing(id, true)
-                : `<span class="row-spacer"></span>`
+            state.listsEditMode
+              ? `<button type="button" class="delete-btn" data-delete-list="${listId}" aria-label="Удалить список">${DELETE_ICON}</button>`
+              : hasSubs
+                ? `<div class="row-trailing">
+                    <span class="sub-progress ${doneCount >= total ? "complete" : ""}">${doneCount}/${total}</span>
+                    <button type="button" class="expand-btn" data-expand="${id}" aria-label="Пункты">${CHEVRON_ICON}</button>
+                  </div>`
+                : list.subtitle
+                  ? infoTrailing(id, true)
+                  : `<span class="row-spacer"></span>`
           }
         </div>
         ${descBlock(id, list.subtitle || "")}
@@ -320,15 +349,25 @@ function renderLists() {
                       <span class="task-title ${s.status ? "done" : ""}">${escapeHtml(s.title)}</span>
                     </div>
                     ${
-                      subDesc
-                        ? infoTrailing(sid, true)
-                        : `<span class="row-spacer"></span>`
+                      state.listsEditMode
+                        ? `<button type="button" class="delete-btn sub-delete" data-delete-list="${listId}" data-delete-list-sub="${si}" aria-label="Удалить пункт">${DELETE_ICON}</button>`
+                        : subDesc
+                          ? infoTrailing(sid, true)
+                          : `<span class="row-spacer"></span>`
                     }
                   </div>
                   ${descBlock(sid, subDesc)}
                 </div>`;
               })
-              .join("") || `<p class="lists-empty soft">Пустой список</p>`
+              .join("") ||
+            (state.listsEditMode
+              ? ""
+              : `<p class="lists-empty soft">Пустой список</p>`)
+          }
+          ${
+            state.listsEditMode
+              ? `<button type="button" class="add-sub-row" data-add-list-sub="${listId}">+ Добавить пункт</button>`
+              : ""
           }
         </div></div>
       </article>`;
@@ -342,6 +381,14 @@ function toggleEdit(force) {
   $("#btn-edit").classList.toggle("active", state.editMode);
   $("#edit-toolbar").classList.toggle("hidden", !state.editMode);
   renderTasks();
+}
+
+function toggleListsEdit(force) {
+  state.listsEditMode = typeof force === "boolean" ? force : !state.listsEditMode;
+  document.body.classList.toggle("lists-edit-mode", state.listsEditMode);
+  $("#btn-lists-edit")?.classList.toggle("active", state.listsEditMode);
+  $("#lists-edit-toolbar")?.classList.toggle("hidden", !state.listsEditMode);
+  renderLists();
 }
 
 function playPressAnim(card) {
@@ -366,6 +413,13 @@ function refreshDoneUI() {
     const mainTitle = card.querySelector(":scope > .task-row .task-title");
     mainCheck?.classList.toggle("done", done);
     mainTitle?.classList.toggle("done", done);
+
+    const prog = card.querySelector(":scope > .task-row .sub-progress");
+    if (prog && item.tasks?.length) {
+      const { doneCount, total } = subProgress(item.tasks);
+      prog.textContent = `${doneCount}/${total}`;
+      prog.classList.toggle("complete", doneCount >= total);
+    }
 
     (item.tasks || []).forEach((s, si) => {
       const row = card.querySelector(`.task-row.sub[data-sub-index="${si}"]`);
@@ -400,7 +454,17 @@ function closeModal(id) {
   $(`#${id}`).classList.add("hidden");
 }
 
-function openAddModal() {
+function openAddModal(target = null) {
+  state.addTarget = target;
+  const isList = !!target?.listId;
+  if (isList) {
+    const list = state.store.lists?.[String(target.listId)];
+    $("#modal-add-title").textContent = list?.title
+      ? `Пункт: ${list.title}`
+      : "Новый пункт списка";
+  } else {
+    $("#modal-add-title").textContent = "Новая задача";
+  }
   $("#add-task-input").value = "";
   $("#add-task-desc").value = "";
   openModal("modal-add");
@@ -411,6 +475,19 @@ function addTask(title, description = "") {
   title = title.trim();
   if (!title) return;
   description = String(description || "").trim().slice(0, DESC_MAX);
+
+  if (state.addTarget?.listId != null) {
+    const list = state.store.lists?.[String(state.addTarget.listId)];
+    if (!list) return;
+    if (!list.tasks) list.tasks = [];
+    list.tasks.push({ title, subtitle: description, status: 0 });
+    state.expanded.add(listViewId(state.addTarget.listId));
+    state.addTarget = null;
+    renderLists();
+    persist();
+    return;
+  }
+
   const day = state.selectedDay;
   if (!state.store[day]) state.store[day] = [];
   state.store[day].unshift({
@@ -451,6 +528,48 @@ function deleteSub(itemIndex, subIndex) {
   renderTasks();
   persist();
   tg()?.HapticFeedback?.impactOccurred?.("medium");
+}
+
+function deleteList(listId) {
+  delete state.store.lists[String(listId)];
+  for (const day of DAYS) {
+    state.store[day] = (state.store[day] || []).filter(
+      (x) => !(x.kind === "listref" && String(x.listId) === String(listId))
+    );
+  }
+  state.expanded.delete(listViewId(listId));
+  renderLists();
+  persist();
+  tg()?.HapticFeedback?.impactOccurred?.("medium");
+}
+
+function deleteListSub(listId, subIndex) {
+  const list = state.store.lists?.[String(listId)];
+  if (!list?.tasks) return;
+  list.tasks.splice(subIndex, 1);
+  renderLists();
+  persist();
+  tg()?.HapticFeedback?.impactOccurred?.("medium");
+}
+
+function openAddListSubModal(listId) {
+  const entries = Object.entries(state.store.lists || {}).sort(
+    (a, b) => Number(a[0]) - Number(b[0])
+  );
+  if (!entries.length) {
+    tg()?.showAlert?.("Сначала добавьте список в коде задач.");
+    return;
+  }
+  if (listId != null && state.store.lists[String(listId)]) {
+    openAddModal({ listId: String(listId) });
+    return;
+  }
+  if (entries.length === 1) {
+    openAddModal({ listId: entries[0][0] });
+    return;
+  }
+  // несколько списков — берём первый по номеру; точечно: кнопка «+» у списка
+  openAddModal({ listId: entries[0][0] });
 }
 
 function handleReorder({ fromId, toId, mode }) {
@@ -523,10 +642,9 @@ function setListStatus(listId, status, subIndex = null) {
   if (!list) return;
   if (subIndex == null) {
     list.status = status ? 1 : 0;
-    for (const t of list.tasks || []) t.status = status ? 1 : 0;
+    // пункты не трогаем — галочка только на самом списке
   } else if (list.tasks?.[subIndex]) {
     list.tasks[subIndex].status = status ? 1 : 0;
-    list.status = list.tasks.every((t) => t.status) ? 1 : 0;
   }
 }
 
@@ -557,8 +675,11 @@ function bindEvents() {
 
   $("#btn-edit").addEventListener("click", () => toggleEdit());
   $("#btn-done-edit").addEventListener("click", () => toggleEdit(false));
-  $("#btn-add-task").addEventListener("click", () => openAddModal());
+  $("#btn-add-task").addEventListener("click", () => openAddModal(null));
   $("#btn-to-streak").addEventListener("click", () => setTab("streak"));
+  $("#btn-lists-edit")?.addEventListener("click", () => toggleListsEdit());
+  $("#btn-lists-done")?.addEventListener("click", () => toggleListsEdit(false));
+  $("#btn-lists-add")?.addEventListener("click", () => openAddListSubModal());
 
   $("#task-list").addEventListener("click", (e) => {
     const delSub = e.target.closest("[data-delete-sub]");
@@ -627,6 +748,7 @@ function bindEvents() {
       if (card) playPressAnim(card);
       refreshDoneUI();
       if (item.fromList || item.kind === "listref") {
+        // прогресс пунктов мог измениться
         if (state.tab === "lists") renderLists();
       }
       persist();
@@ -635,6 +757,27 @@ function bindEvents() {
   });
 
   $("#lists-root")?.addEventListener("click", (e) => {
+    const addSub = e.target.closest("[data-add-list-sub]");
+    if (addSub) {
+      e.stopPropagation();
+      openAddListSubModal(addSub.dataset.addListSub);
+      return;
+    }
+
+    const delSub = e.target.closest("[data-delete-list-sub]");
+    if (delSub) {
+      e.stopPropagation();
+      deleteListSub(delSub.dataset.deleteList, Number(delSub.dataset.deleteListSub));
+      return;
+    }
+
+    const delList = e.target.closest("[data-delete-list]");
+    if (delList && delList.dataset.deleteListSub == null) {
+      e.stopPropagation();
+      deleteList(delList.dataset.deleteList);
+      return;
+    }
+
     const descToggle = e.target.closest("[data-desc-toggle]");
     if (descToggle) {
       e.stopPropagation();
@@ -645,6 +788,8 @@ function bindEvents() {
       if (block) block.classList.toggle("open", state.descOpen.has(id));
       return;
     }
+
+    if (state.listsEditMode) return;
 
     const expand = e.target.closest("[data-expand]");
     if (expand) {
@@ -667,9 +812,7 @@ function bindEvents() {
     const sub = toggle.dataset.listSub;
 
     if (toggle.dataset.parentToggle === "1" && sub == null) {
-      const tasks = list.tasks || [];
-      const done = !!list.status || (tasks.length > 0 && tasks.every((t) => t.status));
-      setListStatus(listId, done ? 0 : 1);
+      setListStatus(listId, list.status ? 0 : 1);
     } else if (sub != null) {
       const si = Number(sub);
       const cur = !!list.tasks?.[si]?.status;
@@ -734,6 +877,7 @@ async function boot() {
   }
 
   evaluateStreak(state.store, new Date());
+  ensureWeekTaskStatuses(state.store, new Date());
   try {
     await saveStore(state.store);
   } catch (_) {}
