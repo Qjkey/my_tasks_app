@@ -27,7 +27,7 @@ export const DAYS = [
 ];
 
 export const DAY_SHORT = ["ПН", "ВТ", "СР", "ЧТ", "ПТ", "СБ", "ВС"];
-export const DESC_MAX = 64;
+export const DESC_MAX = 256;
 
 const DAY_ALIASES = {
   пн: "понедельник",
@@ -258,7 +258,7 @@ export function serializeToCode(store) {
   return (lines.join("\n").trim() + "\n").replace(/^\n+/, "");
 }
 
-/** Подтянуть listref из store.lists (живая ссылка на статусы) */
+/** Подтянуть listref из store.lists (пункты общие; галочка родителя — на день) */
 export function resolveDayItems(store, dayName) {
   return (store[dayName] || []).map((item, index) => {
     if (item.kind === "listref" && item.listId != null) {
@@ -269,9 +269,10 @@ export function resolveDayItems(store, dayName) {
           index,
           title: `Список ${item.listId}`,
           subtitle: "",
-          status: 0,
+          status: item.status ? 1 : 0,
           tasks: [],
           resolved: false,
+          fromList: true,
         };
       }
       return {
@@ -279,7 +280,8 @@ export function resolveDayItems(store, dayName) {
         index,
         title: list.title,
         subtitle: list.subtitle || "",
-        status: list.status ? 1 : 0,
+        // статус самой задачи — только на этот день
+        status: item.status ? 1 : 0,
         tasks: (list.tasks || []).map((t) => ({ ...t })),
         resolved: true,
         fromList: true,
@@ -297,7 +299,7 @@ export function resolveDayItems(store, dayName) {
 }
 
 export function itemIsDone(item) {
-  // Адаптивный список: галочка родителя независима от пунктов
+  // Адаптивный список: для огонька и галочки — только сама задача, не пункты
   if (item.kind === "listref" || item.fromList) {
     return !!item.status;
   }
@@ -308,21 +310,22 @@ export function itemIsDone(item) {
   return !!item.status;
 }
 
-/** Обновить status; для listref пишет в store.lists (без каскада на пункты) */
+/**
+ * Обновить status.
+ * listref: родитель — в дне; пункты — в store.lists (общие).
+ */
 export function setItemStatus(store, dayName, itemIndex, status, subIndex = null) {
   const raw = store[dayName]?.[itemIndex];
   if (!raw) return;
 
   if (raw.kind === "listref" && raw.listId != null) {
     const list = store.lists?.[String(raw.listId)];
-    if (!list) return;
     if (subIndex == null) {
-      list.status = status ? 1 : 0;
-      // пункты не трогаем
-    } else if (list.tasks?.[subIndex]) {
-      list.tasks[subIndex].status = status ? 1 : 0;
-      // статус родителя не синхронизируем с пунктами
+      raw.status = status ? 1 : 0;
+      return;
     }
+    if (!list?.tasks?.[subIndex]) return;
+    list.tasks[subIndex].status = status ? 1 : 0;
     return;
   }
 
@@ -365,7 +368,12 @@ export function applyCode(store, codeText) {
   for (const day of DAYS) {
     const prev = store[day] || [];
     store[day] = (parsed.days[day] || []).map((item) => {
-      if (item.kind === "listref") return { ...item };
+      if (item.kind === "listref") {
+        const p = prev.find(
+          (x) => x.kind === "listref" && String(x.listId) === String(item.listId)
+        );
+        return { ...item, status: p?.status ? 1 : 0 };
+      }
       const p = prev.find((x) => x.kind !== "listref" && x.title === item.title);
       return mergeItemStatus(p, item);
     });

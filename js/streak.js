@@ -1,12 +1,13 @@
 /**
- * Огонёк — история по календарным датам (listref не учитывается).
+ * Огонёк — история по календарным датам.
  *
  * Правила:
  * - Успех дня пишется в streak.history[YYYY-MM-DD] когда все обязательные задачи дня выполнены.
+ * - Адаптивный список (listref) учитывается: нужна только галочка самой задачи, не пунктов.
  * - Пока сегодняшний день не закрыт, серия считается от вчера (не сбрасывается утром).
  * - Если вчерашний участвующий день не в history — серия = 0.
- * - Точки недели: past/today из history; адаптивные списки не влияют.
- * - Статусы задач дней сбрасываются при наступлении новой недели (пн).
+ * - Статусы задач дней (включая галочку listref) сбрасываются при наступлении новой недели (пн).
+ * - Пункты адаптивных списков (lists.*.tasks) при смене недели не сбрасываются.
  */
 
 import {
@@ -20,9 +21,7 @@ import {
 } from "./model.js";
 
 export function requiredItems(store, dayName) {
-  return resolveDayItems(store, dayName).filter(
-    (t) => t.kind !== "listref" && !t.fromList
-  );
+  return resolveDayItems(store, dayName);
 }
 
 export function isDayFullyDone(store, dayName) {
@@ -45,8 +44,8 @@ function ensureStreak(store) {
 }
 
 /**
- * Новая календарная неделя → обнулить status у задач дней (не lists).
- * Первый запуск без statusWeek — только зафиксировать неделю, без сброса.
+ * Новая календарная неделя → обнулить status у задач дней
+ * (включая галочку listref на день; пункты lists не трогаем).
  */
 export function ensureWeekTaskStatuses(store, today = new Date()) {
   ensureStreak(store);
@@ -59,8 +58,8 @@ export function ensureWeekTaskStatuses(store, today = new Date()) {
 
   for (const day of DAYS) {
     for (const item of store[day] || []) {
-      if (item.kind === "listref") continue;
       item.status = 0;
+      if (item.kind === "listref") continue;
       for (const t of item.tasks || []) t.status = 0;
     }
   }

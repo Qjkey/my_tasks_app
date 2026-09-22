@@ -126,7 +126,7 @@ textarea {
 }
 
 .day-selector .chevron {
-  color: #ffffff;
+  color: var(--tg-theme-text-color, var(--text));
   opacity: 1;
   transition: transform 0.2s;
 }
