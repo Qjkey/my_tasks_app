@@ -240,7 +240,7 @@ function slotPosClass(i, len) {
   return "slot-mid";
 }
 
-function renderSlotBlock(slot) {
+function renderSlotBlock(slot, { showStart = false, showEnd = false } = {}) {
   const hasTime = slot.start && slot.end;
   const active = !!slot.active && hasTime;
   const cards =
@@ -258,9 +258,17 @@ function renderSlotBlock(slot) {
 
   const rail = hasTime
     ? `<div class="slot-rail" aria-hidden="true">
-        <span class="slot-time start ${active ? "accent" : ""}">${escapeHtml(slot.start)}</span>
+        ${
+          showStart
+            ? `<span class="slot-time start ${active ? "accent" : ""}">${escapeHtml(slot.start)}</span>`
+            : `<span class="slot-rail-spacer"></span>`
+        }
         <div class="slot-line ${active ? "active" : ""}"></div>
-        <span class="slot-time end ${active ? "accent" : ""}">${escapeHtml(slot.end)}</span>
+        ${
+          showEnd
+            ? `<span class="slot-time end ${active ? "accent" : ""}">${escapeHtml(slot.end)}</span>`
+            : `<span class="slot-rail-spacer"></span>`
+        }
       </div>`
     : `<div class="slot-rail empty" aria-hidden="true"></div>`;
 
@@ -268,6 +276,14 @@ function renderSlotBlock(slot) {
     ${rail}
     <div class="slot-cards">${cards}</div>
   </section>`;
+}
+
+function renderSlotBoundary(time, accent) {
+  if (!time) return "";
+  return `<div class="slot-boundary" aria-hidden="true">
+    <span class="slot-time ${accent ? "accent" : ""}">${escapeHtml(time)}</span>
+    <span class="slot-boundary-gap"></span>
+  </div>`;
 }
 
 function renderTasks() {
@@ -284,7 +300,24 @@ function renderTasks() {
     }
   }
 
-  list.innerHTML = groups.map(renderSlotBlock).join("");
+  const parts = [];
+  groups.forEach((slot, i) => {
+    const isFirst = i === 0;
+    const isLast = i === groups.length - 1;
+    parts.push(
+      renderSlotBlock(slot, {
+        showStart: isFirst && !!slot.start,
+        showEnd: isLast && !!slot.end,
+      })
+    );
+    if (!isLast && slot.end) {
+      const next = groups[i + 1];
+      const accent = !!(slot.active || next?.active);
+      parts.push(renderSlotBoundary(slot.end, accent));
+    }
+  });
+
+  list.innerHTML = parts.join("");
 }
 
 function renderStreak() {
