@@ -18,6 +18,7 @@ import {
   startOfWeek,
   resolveDayItems,
   itemIsDone,
+  getDayItems,
 } from "./model.js";
 
 export function requiredItems(store, dayName) {
@@ -57,7 +58,7 @@ export function ensureWeekTaskStatuses(store, today = new Date()) {
   if (store.streak.statusWeek === weekKey) return false;
 
   for (const day of DAYS) {
-    for (const item of store[day] || []) {
+    for (const item of getDayItems(store, day)) {
       item.status = 0;
       if (item.kind === "listref") continue;
       for (const t of item.tasks || []) t.status = 0;

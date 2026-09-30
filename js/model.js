@@ -1,19 +1,17 @@
 /**
  * Модель данных v2
  *
- * KV (один JSON на пользователя):
+ * KV:
  * {
  *   version: 2,
- *   понедельник: [ Item, ... ],
+ *   понедельник: { slots: Slot[], items: Item[] },
  *   ...
- *   воскресенье: [ Item, ... ],
- *   lists: { "1": List, "2": List },
- *   streak: { count, lastSuccessDate, history }
+ *   lists: { "1": List },
+ *   streak: { ... }
  * }
  *
- * Item: { title, subtitle, status: 0|1, kind?, listId?, tasks?: Sub[] }
- * Sub:  { title, subtitle, status: 0|1 }
- * List: { title, subtitle, status, tasks: Sub[] }
+ * Slot: { id, start, end }  // end = start следующего или LAST_SLOT_END
+ * Item: { title, subtitle, status, kind?, listId?, slotId?, tasks?: Sub[] }
  */
 
 export const DAYS = [
@@ -28,6 +26,7 @@ export const DAYS = [
 
 export const DAY_SHORT = ["ПН", "ВТ", "СР", "ЧТ", "ПТ", "СБ", "ВС"];
 export const DESC_MAX = 256;
+export const LAST_SLOT_END = "22:00";
 
 const DAY_ALIASES = {
   пн: "понедельник",
@@ -82,6 +81,10 @@ export function addDays(date, n) {
   return d;
 }
 
+export function emptyDay() {
+  return { slots: [], items: [] };
+}
+
 export function emptyStore() {
   const store = {
     version: 2,
@@ -89,8 +92,67 @@ export function emptyStore() {
     streak: { count: 0, lastSuccessDate: null, history: {}, statusWeek: null },
     updatedAt: null,
   };
-  for (const d of DAYS) store[d] = [];
+  for (const d of DAYS) store[d] = emptyDay();
   return store;
+}
+
+/** Нормализация дня: массив (legacy) → { slots, items } */
+export function ensureDay(store, dayName) {
+  const raw = store[dayName];
+  if (!raw) {
+    store[dayName] = emptyDay();
+    return store[dayName];
+  }
+  if (Array.isArray(raw)) {
+    store[dayName] = { slots: [], items: raw };
+    return store[dayName];
+  }
+  if (!Array.isArray(raw.slots)) raw.slots = [];
+  if (!Array.isArray(raw.items)) raw.items = [];
+  return raw;
+}
+
+export function getDayItems(store, dayName) {
+  return ensureDay(store, dayName).items;
+}
+
+export function getDaySlots(store, dayName) {
+  return ensureDay(store, dayName).slots;
+}
+
+export function timeToMinutes(hhmm) {
+  const m = String(hhmm || "").trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+  return Number(m[1]) * 60 + Number(m[2]);
+}
+
+export function formatTime(hhmm) {
+  const mins = timeToMinutes(hhmm);
+  if (mins == null) return hhmm || "";
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+export function finalizeSlots(slots) {
+  const list = (slots || [])
+    .map((s) => ({ id: String(s.id), start: formatTime(s.start) }))
+    .filter((s) => s.id && timeToMinutes(s.start) != null)
+    .sort((a, b) => Number(a.id) - Number(b.id));
+
+  return list.map((s, i) => ({
+    id: s.id,
+    start: s.start,
+    end: list[i + 1] ? list[i + 1].start : LAST_SLOT_END,
+  }));
+}
+
+export function isSlotActive(slot, date = new Date()) {
+  const now = date.getHours() * 60 + date.getMinutes();
+  const start = timeToMinutes(slot.start);
+  const end = timeToMinutes(slot.end);
+  if (start == null || end == null) return false;
+  return now >= start && now < end;
 }
 
 function splitTitleDesc(inner) {
@@ -112,14 +174,16 @@ function classifyMarker(marker) {
 }
 
 const DAY_RE = /^\(\s*([^)]+?)\s*\)\s*$/u;
+const SLOT_RE = /^@\[(\d+)\]\s*\{\s*(\d{1,2}:\d{2})\s*\}\s*$/u;
+const LIST_REF_SLOT_RE = /^\[\{(\d+)\}\]\s*@\((\d+)\)\s*$/u;
 const LIST_REF_RE = /^\[\{(\d+)\}\]\s*$/u;
 const LIST_DEF_RE = /^\[\{(\d+)\}\]\s*\{\s*(.*?)\s*\}\s*$/u;
+const TASK_SLOT_RE = /^(\[[^\]]*\])\s*@\((\d+)\)\s*\{\s*(.*?)\s*\}\s*$/u;
 const TASK_RE = /^(\[[^\]]*\])\s*\{\s*(.*?)\s*\}\s*$/u;
 const SUB_RE = /^\s*-\s*\{\s*(.*?)\s*\}\s*$/u;
 
-/** Разобрать код → { days, lists } без статусов (status=0) */
 export function parseTaskCode(text) {
-  const days = Object.fromEntries(DAYS.map((d) => [d, []]));
+  const days = Object.fromEntries(DAYS.map((d) => [d, emptyDay()]));
   const lists = {};
   let current = null;
   let lastParent = null;
@@ -148,6 +212,17 @@ export function parseTaskCode(text) {
 
     const trimmed = line.trim();
 
+    const slotMatch = trimmed.match(SLOT_RE);
+    if (slotMatch && current) {
+      days[current].slots.push({
+        id: slotMatch[1],
+        start: formatTime(slotMatch[2]),
+      });
+      lastParent = null;
+      lastList = null;
+      continue;
+    }
+
     const listDef = trimmed.match(LIST_DEF_RE);
     if (listDef) {
       const listId = listDef[1];
@@ -163,17 +238,57 @@ export function parseTaskCode(text) {
       continue;
     }
 
+    const listRefSlot = trimmed.match(LIST_REF_SLOT_RE);
+    if (listRefSlot && current) {
+      days[current].items.push({
+        title: "",
+        subtitle: "",
+        status: 0,
+        kind: "listref",
+        listId: listRefSlot[1],
+        slotId: listRefSlot[2],
+        tasks: [],
+      });
+      lastParent = null;
+      lastList = null;
+      continue;
+    }
+
     const listRef = trimmed.match(LIST_REF_RE);
     if (listRef && current) {
-      days[current].push({
+      days[current].items.push({
         title: "",
         subtitle: "",
         status: 0,
         kind: "listref",
         listId: listRef[1],
+        slotId: null,
         tasks: [],
       });
       lastParent = null;
+      lastList = null;
+      continue;
+    }
+
+    const taskSlot = trimmed.match(TASK_SLOT_RE);
+    if (taskSlot && current) {
+      const meta = classifyMarker(taskSlot[1]);
+      if (!meta) {
+        lastParent = null;
+        lastList = null;
+        continue;
+      }
+      const { title, subtitle } = splitTitleDesc(taskSlot[3]);
+      const item = {
+        title,
+        subtitle: meta.hasSubs ? "" : subtitle,
+        status: 0,
+        kind: meta.kind,
+        slotId: taskSlot[2],
+        tasks: [],
+      };
+      days[current].items.push(item);
+      lastParent = meta.hasSubs ? item : null;
       lastList = null;
       continue;
     }
@@ -192,9 +307,10 @@ export function parseTaskCode(text) {
         subtitle: meta.hasSubs ? "" : subtitle,
         status: 0,
         kind: meta.kind,
+        slotId: null,
         tasks: [],
       };
-      days[current].push(item);
+      days[current].items.push(item);
       lastParent = meta.hasSubs ? item : null;
       lastList = null;
       continue;
@@ -202,6 +318,10 @@ export function parseTaskCode(text) {
 
     lastParent = null;
     lastList = null;
+  }
+
+  for (const d of DAYS) {
+    days[d].slots = finalizeSlots(days[d].slots);
   }
 
   return { days, lists };
@@ -221,25 +341,33 @@ function formatTitle(title, subtitle) {
   return s ? `${t} | ${s}` : t;
 }
 
-/** Сериализация всего store в код (дни + списки + UI-задачи) */
+function slotAttr(item) {
+  return item.slotId != null && item.slotId !== "" ? ` @(${item.slotId})` : "";
+}
+
 export function serializeToCode(store) {
   const lines = [];
   for (const day of DAYS) {
     lines.push(`(${day})`);
-    for (const item of store[day] || []) {
+    const dayData = ensureDay(store, day);
+    const slots = finalizeSlots(dayData.slots);
+    for (const slot of slots) {
+      lines.push(`@[${slot.id}] {${slot.start}}`);
+    }
+    for (const item of dayData.items || []) {
       if (item.kind === "listref" && item.listId) {
-        lines.push(`[{${item.listId}}]`);
+        lines.push(`[{${item.listId}}]${slotAttr(item)}`);
         continue;
       }
       const hasSubs = item.tasks?.length > 0;
       if (hasSubs || item.kind === "group") {
-        lines.push(`[{}] { ${item.title || ""} }`);
+        lines.push(`[{}]${slotAttr(item)} { ${item.title || ""} }`);
         for (const sub of item.tasks || []) {
           lines.push(`    - { ${formatTitle(sub.title, sub.subtitle)} }`);
         }
       } else {
         const mark = markerFor(item);
-        lines.push(`${mark} { ${formatTitle(item.title, item.subtitle)} }`);
+        lines.push(`${mark}${slotAttr(item)} { ${formatTitle(item.title, item.subtitle)} }`);
       }
     }
     lines.push("");
@@ -258,9 +386,8 @@ export function serializeToCode(store) {
   return (lines.join("\n").trim() + "\n").replace(/^\n+/, "");
 }
 
-/** Подтянуть listref из store.lists (пункты общие; галочка родителя — на день) */
 export function resolveDayItems(store, dayName) {
-  return (store[dayName] || []).map((item, index) => {
+  return getDayItems(store, dayName).map((item, index) => {
     if (item.kind === "listref" && item.listId != null) {
       const list = store.lists?.[String(item.listId)];
       if (!list) {
@@ -280,7 +407,6 @@ export function resolveDayItems(store, dayName) {
         index,
         title: list.title,
         subtitle: list.subtitle || "",
-        // статус самой задачи — только на этот день
         status: item.status ? 1 : 0,
         tasks: (list.tasks || []).map((t) => ({ ...t })),
         resolved: true,
@@ -298,8 +424,25 @@ export function resolveDayItems(store, dayName) {
   });
 }
 
+/** Слоты по номеру; задачи внутри — порядок массива дня. Пустой слот → items []. */
+export function groupDayBySlots(store, dayName) {
+  const slots = finalizeSlots(getDaySlots(store, dayName));
+  const items = resolveDayItems(store, dayName);
+
+  if (!slots.length) {
+    if (!items.length) return [];
+    return [{ id: "_", start: null, end: null, active: false, items }];
+  }
+
+  const now = new Date();
+  return slots.map((slot) => ({
+    ...slot,
+    active: isSlotActive(slot, now),
+    items: items.filter((it) => String(it.slotId) === String(slot.id)),
+  }));
+}
+
 export function itemIsDone(item) {
-  // Адаптивный список: для огонька и галочки — только сама задача, не пункты
   if (item.kind === "listref" || item.fromList) {
     return !!item.status;
   }
@@ -310,12 +453,9 @@ export function itemIsDone(item) {
   return !!item.status;
 }
 
-/**
- * Обновить status.
- * listref: родитель — в дне; пункты — в store.lists (общие).
- */
 export function setItemStatus(store, dayName, itemIndex, status, subIndex = null) {
-  const raw = store[dayName]?.[itemIndex];
+  const items = getDayItems(store, dayName);
+  const raw = items[itemIndex];
   if (!raw) return;
 
   if (raw.kind === "listref" && raw.listId != null) {
@@ -342,12 +482,15 @@ export function setItemStatus(store, dayName, itemIndex, status, subIndex = null
 
 function mergeItemStatus(prev, next) {
   if (!prev) return next;
-  if (next.kind === "listref") return { ...next };
+  if (next.kind === "listref") {
+    return { ...next, status: prev.status ? 1 : 0 };
+  }
   const byTitle = new Map((prev.tasks || []).map((t) => [t.title, t]));
   return {
     ...next,
     status: prev.status ? 1 : next.status ? 1 : 0,
     subtitle: next.subtitle || prev.subtitle || "",
+    slotId: next.slotId != null ? next.slotId : prev.slotId ?? null,
     tasks: (next.tasks || []).map((t) => {
       const p = byTitle.get(t.title);
       return {
@@ -359,24 +502,24 @@ function mergeItemStatus(prev, next) {
   };
 }
 
-/**
- * Применить код: полная перезапись дней и списков.
- * Статусы сохраняются только у совпавших по title / listId.
- */
 export function applyCode(store, codeText) {
   const parsed = parseTaskCode(codeText);
   for (const day of DAYS) {
-    const prev = store[day] || [];
-    store[day] = (parsed.days[day] || []).map((item) => {
+    const prevItems = getDayItems(store, day);
+    const nextItems = (parsed.days[day]?.items || []).map((item) => {
       if (item.kind === "listref") {
-        const p = prev.find(
+        const p = prevItems.find(
           (x) => x.kind === "listref" && String(x.listId) === String(item.listId)
         );
         return { ...item, status: p?.status ? 1 : 0 };
       }
-      const p = prev.find((x) => x.kind !== "listref" && x.title === item.title);
+      const p = prevItems.find((x) => x.kind !== "listref" && x.title === item.title);
       return mergeItemStatus(p, item);
     });
+    store[day] = {
+      slots: finalizeSlots(parsed.days[day]?.slots || []),
+      items: nextItems,
+    };
   }
 
   const prevLists = store.lists || {};
@@ -406,56 +549,65 @@ export function applyCode(store, codeText) {
   return store;
 }
 
-/** Миграция старого store v1 → v2 */
+/** Миграция старого store v1 / плоских массивов дней → { slots, items } */
 export function migrateFromV1(old) {
   const store = emptyStore();
   store.streak = {
     count: old.streak?.count || 0,
     lastSuccessDate: old.streak?.lastSuccessDate || null,
     history: { ...(old.streak?.history || {}) },
+    statusWeek: old.streak?.statusWeek || null,
   };
 
-  // lists
   for (const [id, list] of Object.entries(old.lists || {})) {
     const parentDone =
       !!old.listCompletions?.[`alist_${id}`] ||
       !!old.listCompletions?.[`list_${id}`];
-    const tasks = (list.subtasks || []).map((s) => ({
+    const tasks = (list.subtasks || list.tasks || []).map((s) => ({
       title: s.title,
-      subtitle: s.description || "",
+      subtitle: s.description || s.subtitle || "",
       status:
-        old.listCompletions?.[s.id] ||
-        old.listCompletions?.[`als_${id}_${s.title}`]
+        old.listCompletions?.[s.id] || s.status
           ? 1
           : 0,
     }));
     store.lists[id] = {
       title: list.title,
-      subtitle: list.description || "",
-      status: parentDone || (tasks.length && tasks.every((t) => t.status)) ? 1 : 0,
+      subtitle: list.description || list.subtitle || "",
+      status: parentDone || list.status || (tasks.length && tasks.every((t) => t.status)) ? 1 : 0,
       tasks,
     };
   }
 
-  // если есть template — база структуры из кода (чтобы не переписывать)
+  // уже v2 с массивами дней
+  if (DAYS.some((d) => Array.isArray(old[d]) || old[d]?.items)) {
+    for (const d of DAYS) {
+      const raw = old[d];
+      if (Array.isArray(raw)) {
+        store[d] = { slots: [], items: raw.map((x) => ({ ...x })) };
+      } else if (raw?.items) {
+        store[d] = {
+          slots: finalizeSlots(raw.slots || []),
+          items: (raw.items || []).map((x) => ({ ...x })),
+        };
+      }
+    }
+    return store;
+  }
+
   if (old.template) {
     const parsed = parseTaskCode(old.template);
     for (const d of DAYS) {
-      if (parsed.days[d]?.length) {
-        // статусы наложим ниже из completions / days
-        store[d] = parsed.days[d].map((item) => ({ ...item, tasks: (item.tasks || []).map((t) => ({ ...t })) }));
-      }
+      store[d] = {
+        slots: finalizeSlots(parsed.days[d]?.slots || []),
+        items: (parsed.days[d]?.items || []).map((item) => ({
+          ...item,
+          tasks: (item.tasks || []).map((t) => ({ ...t })),
+        })),
+      };
     }
     for (const [id, list] of Object.entries(parsed.lists || {})) {
       if (!store.lists[id]) store.lists[id] = list;
-      else {
-        // дополнить пункты из кода, если библиотека была короче
-        const have = new Set((store.lists[id].tasks || []).map((t) => t.title));
-        for (const t of list.tasks || []) {
-          if (!have.has(t.title)) store.lists[id].tasks.push({ ...t });
-        }
-        if (!store.lists[id].title) store.lists[id].title = list.title;
-      }
     }
   }
 
@@ -467,24 +619,30 @@ export function migrateFromV1(old) {
     const date = addDays(today, delta);
     const dateKey = toDateKey(date);
     const doneMap = old.completions?.[dateKey] || {};
-
     const template = old.days?.[dayName] || [];
     const extras = old.extraTasks?.[dateKey] || [];
-    const order = old.order?.[dateKey] || null;
 
     const materialize = (t) => {
-      if (t.kind === "listref" || t.kind === "adaptive" || (t.listId != null && t.kind !== "once" && t.kind !== "weekly" && t.kind !== "daily" && t.kind !== "group")) {
+      if (
+        t.kind === "listref" ||
+        t.kind === "adaptive" ||
+        (t.listId != null &&
+          t.kind !== "once" &&
+          t.kind !== "weekly" &&
+          t.kind !== "daily" &&
+          t.kind !== "group")
+      ) {
         return {
           title: "",
           subtitle: "",
           status: 0,
           kind: "listref",
           listId: String(t.listId),
+          slotId: t.slotId ?? null,
           tasks: [],
         };
       }
-      const subs = t.subtasks || [];
-      const tasks = subs.map((s) => ({
+      const tasks = (t.subtasks || []).map((s) => ({
         title: s.title,
         subtitle: s.description || "",
         status: doneMap[s.id] ? 1 : 0,
@@ -495,82 +653,29 @@ export function migrateFromV1(old) {
         title: t.title,
         subtitle: t.description || "",
         status,
-        kind: t.kind === "once" || t.kind === "weekly" ? t.kind : subs.length ? "group" : "daily",
+        kind: t.kind === "once" || t.kind === "weekly" ? t.kind : tasks.length ? "group" : "daily",
+        slotId: t.slotId ?? null,
         tasks,
       };
     };
 
-    let fromOld = [];
-    if (order?.length) {
-      const all = [...template, ...extras];
-      const map = new Map(all.map((t) => [t.id, t]));
-      for (const t of all) {
-        if ((t.kind === "listref" || t.kind === "adaptive") && t.listId) {
-          map.set(`alist_${t.listId}`, t);
-        }
-      }
-      for (const id of order) {
-        const t = map.get(id);
-        if (t) {
-          fromOld.push(materialize(t));
-          map.delete(id);
-          if (t.listId) map.delete(`alist_${t.listId}`);
-          map.delete(t.id);
-        }
-      }
-      for (const t of map.values()) fromOld.push(materialize(t));
-    } else if (template.length || extras.length) {
-      fromOld = [...extras.map(materialize), ...template.map(materialize)];
-    }
+    const fromOld = [...extras.map(materialize), ...template.map(materialize)];
+    const day = ensureDay(store, dayName);
 
-    // если уже есть из template-кода — смержить статусы и UI-extras
-    if (store[dayName]?.length && fromOld.length) {
+    if (day.items.length && fromOld.length) {
       const byTitle = new Map(
         fromOld.filter((x) => x.kind !== "listref").map((x) => [x.title, x])
       );
-      store[dayName] = store[dayName].map((item) => {
+      day.items = day.items.map((item) => {
         if (item.kind === "listref") return item;
         const p = byTitle.get(item.title);
         if (!p) return item;
         byTitle.delete(item.title);
         return mergeItemStatus(p, item);
       });
-      // extras / задачи, которых не было в template
-      for (const p of byTitle.values()) {
-        store[dayName].push(p);
-      }
-      // listref из fromOld, которых нет
-      const haveList = new Set(
-        store[dayName].filter((x) => x.kind === "listref").map((x) => String(x.listId))
-      );
-      for (const p of fromOld) {
-        if (p.kind === "listref" && !haveList.has(String(p.listId))) {
-          store[dayName].push(p);
-          haveList.add(String(p.listId));
-        }
-      }
-    } else if (fromOld.length) {
-      const seenList = new Set();
-      store[dayName] = fromOld.filter((item) => {
-        if (item.kind === "listref") {
-          if (seenList.has(item.listId)) return false;
-          seenList.add(item.listId);
-        }
-        return true;
-      });
-    } else {
-      // проставить статусы из doneMap по title для уже распарсенного template
-      for (const item of store[dayName] || []) {
-        if (item.kind === "listref") continue;
-        const oldT = template.find((t) => t.title === item.title);
-        if (!oldT) continue;
-        if (doneMap[oldT.id]) item.status = 1;
-        for (const s of item.tasks || []) {
-          const os = (oldT.subtasks || []).find((x) => x.title === s.title);
-          if (os && doneMap[os.id]) s.status = 1;
-        }
-        if (item.tasks?.length && item.tasks.every((t) => t.status)) item.status = 1;
-      }
+      for (const p of byTitle.values()) day.items.push(p);
+    } else if (fromOld.length && !day.items.length) {
+      day.items = fromOld;
     }
   }
 
@@ -578,5 +683,7 @@ export function migrateFromV1(old) {
 }
 
 export function isV2(data) {
-  return data?.version === 2 || (data && DAYS.every((d) => Array.isArray(data[d])));
+  if (!data) return false;
+  if (data.version === 2) return true;
+  return DAYS.every((d) => Array.isArray(data[d]) || (data[d] && Array.isArray(data[d].items)));
 }

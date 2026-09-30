@@ -13,10 +13,13 @@ import {
   resolveDayItems,
   setItemStatus,
   itemIsDone,
+  groupDayBySlots,
+  getDayItems,
+  getDaySlots,
+  ensureDay,
 } from "./model.js";
 import { loadStore, saveStore, applyTemplate, getCodeText } from "./storage.js";
 import { evaluateStreak, weekStatus, pluralDays, ensureWeekTaskStatuses } from "./streak.js";
-import { enableDragDrop } from "./dragdrop.js";
 
 const DELETE_ICON = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
   <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
@@ -172,77 +175,116 @@ function subProgress(tasks) {
   return { doneCount, total };
 }
 
+function renderTaskCard(item) {
+  const id = itemId(item.index);
+  const hasSubs = item.tasks?.length > 0;
+  const expanded = state.editMode ? hasSubs : state.expanded.has(id);
+  const done = itemIsDone(item);
+  const desc = item.subtitle || "";
+  const showDesc = !!desc;
+  const { doneCount, total } = subProgress(item.tasks);
+
+  const subs = hasSubs
+    ? `<div class="subtasks"><div class="subtasks-inner">
+        ${item.tasks
+          .map((s, si) => {
+            const sid = subId(item.index, si);
+            const subDesc = s.subtitle || "";
+            const subDone = !!s.status;
+            return `<div class="sub-block" data-sub-wrap="${sid}">
+              <div class="task-row sub" data-item-index="${item.index}" data-sub-index="${si}">
+                <button type="button" class="check ${subDone ? "done" : ""}" data-toggle-item="${item.index}" data-toggle-sub="${si}" aria-label="Готово"></button>
+                <div class="title-wrap">
+                  <span class="task-title ${subDone ? "done" : ""}">${escapeHtml(s.title)}</span>
+                </div>
+                ${
+                  state.editMode
+                    ? `<button type="button" class="delete-btn sub-delete" data-delete-item="${item.index}" data-delete-sub="${si}" aria-label="Удалить подзадачу">${DELETE_ICON}</button>`
+                    : subDesc
+                      ? infoTrailing(sid, true)
+                      : `<span class="row-spacer"></span>`
+                }
+              </div>
+              ${descBlock(sid, subDesc)}
+            </div>`;
+          })
+          .join("")}
+      </div></div>`
+    : "";
+
+  return `<article class="task-card ${expanded ? "expanded" : ""}" data-id="${id}" data-index="${item.index}" data-kind="${item.kind || "daily"}">
+    <div class="task-row">
+      <button type="button" class="check ${done ? "done" : ""}" data-toggle-item="${item.index}" ${hasSubs ? 'data-parent-toggle="1"' : ""} aria-label="Готово"></button>
+      <div class="title-wrap">
+        <span class="task-title ${done ? "done" : ""}">${escapeHtml(item.title)}</span>
+        ${infoInline(id, showDesc, !hasSubs)}
+      </div>
+      ${trailingSlot({
+        id,
+        hasSubs,
+        hasDesc: showDesc,
+        deleteAttr: `data-delete-item="${item.index}"`,
+        doneCount,
+        total,
+      })}
+    </div>
+    ${descBlock(id, desc)}
+    ${subs}
+  </article>`;
+}
+
+function slotPosClass(i, len) {
+  if (len === 1) return "slot-only";
+  if (i === 0) return "slot-first";
+  if (i === len - 1) return "slot-last";
+  return "slot-mid";
+}
+
+function renderSlotBlock(slot) {
+  const hasTime = slot.start && slot.end;
+  const active = !!slot.active && hasTime;
+  const cards =
+    slot.items.length > 0
+      ? slot.items
+          .map((item, i) => {
+            const card = renderTaskCard(item);
+            return card.replace(
+              'class="task-card',
+              `class="task-card ${slotPosClass(i, slot.items.length)}`
+            );
+          })
+          .join("")
+      : `<div class="slot-rest ${slotPosClass(0, 1)}">Отдых</div>`;
+
+  const rail = hasTime
+    ? `<div class="slot-rail" aria-hidden="true">
+        <span class="slot-time start ${active ? "accent" : ""}">${escapeHtml(slot.start)}</span>
+        <div class="slot-line ${active ? "active" : ""}"></div>
+        <span class="slot-time end ${active ? "accent" : ""}">${escapeHtml(slot.end)}</span>
+      </div>`
+    : `<div class="slot-rail empty" aria-hidden="true"></div>`;
+
+  return `<section class="slot-block ${active ? "active" : ""}" data-slot-id="${escapeHtml(String(slot.id))}">
+    ${rail}
+    <div class="slot-cards">${cards}</div>
+  </section>`;
+}
+
 function renderTasks() {
   const list = $("#task-list");
-  const items = resolveDayItems(state.store, state.selectedDay);
+  const groups = groupDayBySlots(state.store, state.selectedDay);
 
   $("#current-day-label").textContent = capitalize(state.selectedDay);
 
   if (state.editMode) {
-    for (const item of items) {
-      if (item.tasks?.length) state.expanded.add(itemId(item.index));
+    for (const g of groups) {
+      for (const item of g.items) {
+        if (item.tasks?.length) state.expanded.add(itemId(item.index));
+      }
     }
   }
 
-  list.innerHTML = items
-    .map((item) => {
-      const id = itemId(item.index);
-      const hasSubs = item.tasks?.length > 0;
-      const expanded = state.editMode ? hasSubs : state.expanded.has(id);
-      const done = itemIsDone(item);
-      const desc = item.subtitle || "";
-      const showDesc = !!desc;
-      const { doneCount, total } = subProgress(item.tasks);
-
-      const subs = hasSubs
-        ? `<div class="subtasks"><div class="subtasks-inner">
-            ${item.tasks
-              .map((s, si) => {
-                const sid = subId(item.index, si);
-                const subDesc = s.subtitle || "";
-                const subDone = !!s.status;
-                return `<div class="sub-block" data-sub-wrap="${sid}">
-                  <div class="task-row sub" data-item-index="${item.index}" data-sub-index="${si}">
-                    <button type="button" class="check ${subDone ? "done" : ""}" data-toggle-item="${item.index}" data-toggle-sub="${si}" aria-label="Готово"></button>
-                    <div class="title-wrap">
-                      <span class="task-title ${subDone ? "done" : ""}">${escapeHtml(s.title)}</span>
-                    </div>
-                    ${
-                      state.editMode
-                        ? `<button type="button" class="delete-btn sub-delete" data-delete-item="${item.index}" data-delete-sub="${si}" aria-label="Удалить подзадачу">${DELETE_ICON}</button>`
-                        : subDesc
-                          ? infoTrailing(sid, true)
-                          : `<span class="row-spacer"></span>`
-                    }
-                  </div>
-                  ${descBlock(sid, subDesc)}
-                </div>`;
-              })
-              .join("")}
-          </div></div>`
-        : "";
-
-      return `<article class="task-card ${expanded ? "expanded" : ""}" data-id="${id}" data-index="${item.index}" data-kind="${item.kind || "daily"}">
-        <div class="task-row">
-          <button type="button" class="check ${done ? "done" : ""}" data-toggle-item="${item.index}" ${hasSubs ? 'data-parent-toggle="1"' : ""} aria-label="Готово"></button>
-          <div class="title-wrap">
-            <span class="task-title ${done ? "done" : ""}">${escapeHtml(item.title)}</span>
-            ${infoInline(id, showDesc, !hasSubs)}
-          </div>
-          ${trailingSlot({
-            id,
-            hasSubs,
-            hasDesc: showDesc,
-            deleteAttr: `data-delete-item="${item.index}"`,
-            doneCount,
-            total,
-          })}
-        </div>
-        ${descBlock(id, desc)}
-        ${subs}
-      </article>`;
-    })
-    .join("");
+  list.innerHTML = groups.map(renderSlotBlock).join("");
 }
 
 function renderStreak() {
@@ -489,12 +531,15 @@ function addTask(title, description = "") {
   }
 
   const day = state.selectedDay;
-  if (!state.store[day]) state.store[day] = [];
-  state.store[day].unshift({
+  ensureDay(state.store, day);
+  const slots = getDaySlots(state.store, day);
+  const slotId = slots[0]?.id ?? null;
+  getDayItems(state.store, day).unshift({
     title,
     subtitle: description,
     status: 0,
     kind: "once",
+    slotId,
     tasks: [],
   });
   renderTasks();
@@ -503,7 +548,7 @@ function addTask(title, description = "") {
 
 function deleteItem(index) {
   const day = state.selectedDay;
-  const arr = state.store[day] || [];
+  const arr = getDayItems(state.store, day);
   if (index < 0 || index >= arr.length) return;
   arr.splice(index, 1);
   state.expanded.clear();
@@ -515,7 +560,7 @@ function deleteItem(index) {
 
 function deleteSub(itemIndex, subIndex) {
   const day = state.selectedDay;
-  const raw = state.store[day]?.[itemIndex];
+  const raw = getDayItems(state.store, day)[itemIndex];
   if (!raw) return;
 
   if (raw.kind === "listref" && raw.listId != null) {
@@ -533,7 +578,8 @@ function deleteSub(itemIndex, subIndex) {
 function deleteList(listId) {
   delete state.store.lists[String(listId)];
   for (const day of DAYS) {
-    state.store[day] = (state.store[day] || []).filter(
+    const items = getDayItems(state.store, day);
+    ensureDay(state.store, day).items = items.filter(
       (x) => !(x.kind === "listref" && String(x.listId) === String(listId))
     );
   }
@@ -568,73 +614,7 @@ function openAddListSubModal(listId) {
     openAddModal({ listId: entries[0][0] });
     return;
   }
-  // несколько списков — берём первый по номеру; точечно: кнопка «+» у списка
   openAddModal({ listId: entries[0][0] });
-}
-
-function handleReorder({ fromId, toId, mode }) {
-  const day = state.selectedDay;
-  const arr = state.store[day] || [];
-  const fromIdx = Number(String(fromId).replace(/^i/, ""));
-  const toIdx = Number(String(toId).replace(/^i/, ""));
-  if (Number.isNaN(fromIdx) || Number.isNaN(toIdx)) return;
-  if (fromIdx < 0 || toIdx < 0 || fromIdx >= arr.length || toIdx >= arr.length) return;
-
-  const [moved] = arr.splice(fromIdx, 1);
-  // индексы после splice сдвигаются
-  let targetIdx = toIdx;
-  if (fromIdx < toIdx) targetIdx = toIdx - 1;
-
-  if (mode === "into") {
-    const parent = arr[targetIdx];
-    if (!parent) {
-      arr.splice(fromIdx, 0, moved);
-      return;
-    }
-    if (parent.kind === "listref" && parent.listId != null) {
-      const list = state.store.lists?.[String(parent.listId)];
-      if (!list) {
-        arr.splice(fromIdx, 0, moved);
-        return;
-      }
-      if (!list.tasks) list.tasks = [];
-      list.tasks.push({
-        title: moved.title,
-        subtitle: moved.subtitle || "",
-        status: moved.status ? 1 : 0,
-      });
-      for (const t of moved.tasks || []) {
-        list.tasks.push({
-          title: t.title,
-          subtitle: t.subtitle || "",
-          status: t.status ? 1 : 0,
-        });
-      }
-    } else {
-      if (!parent.tasks) parent.tasks = [];
-      parent.kind = parent.kind === "listref" ? parent.kind : "group";
-      parent.tasks.push({
-        title: moved.title,
-        subtitle: moved.subtitle || "",
-        status: moved.status ? 1 : 0,
-      });
-      for (const t of moved.tasks || []) {
-        parent.tasks.push({
-          title: t.title,
-          subtitle: t.subtitle || "",
-          status: t.status ? 1 : 0,
-        });
-      }
-    }
-    state.expanded.add(itemId(targetIdx));
-  } else {
-    let insertAt = targetIdx;
-    if (mode === "after") insertAt += 1;
-    arr.splice(insertAt, 0, moved);
-  }
-
-  renderTasks();
-  persist();
 }
 
 function setListStatus(listId, status, subIndex = null) {
@@ -826,8 +806,6 @@ function bindEvents() {
     tg()?.HapticFeedback?.impactOccurred?.("light");
   });
 
-  enableDragDrop($("#task-list"), { onReorder: handleReorder });
-
   $$("[data-close]").forEach((el) => {
     el.addEventListener("click", () => closeModal(el.dataset.close));
   });
@@ -887,6 +865,11 @@ async function boot() {
   renderTasks();
   renderStreak();
   syncTelegramChrome();
+
+  // обновлять активный слот раз в минуту
+  setInterval(() => {
+    if (state.tab === "week" && state.store) renderTasks();
+  }, 60_000);
 }
 
 boot();

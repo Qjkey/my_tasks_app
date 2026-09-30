@@ -102,8 +102,8 @@
     <div class="modal-backdrop" data-close="modal-code"></div>
     <div class="modal-sheet wide">
       <h2 id="modal-code-title">Код задач</h2>
-      <p class="modal-hint">Описание: [] { Название | текст }. Списки: [{1}] { Покупки } и пункты «-». В дне: [{1}]. Код включает все задачи, в том числе добавленные в интерфейсе.</p>
-      <textarea id="code-textarea" class="code-area" spellcheck="false" placeholder="(понедельник)&#10;[] { Задача | описание }"></textarea>
+      <p class="modal-hint">Слоты: @[1] {09:00} (последний до 22:00). Задачи: [] @(1) { … }. Списки: [{1}] { … }, в дне: [{1}] @(2). Описание: | текст.</p>
+      <textarea id="code-textarea" class="code-area" spellcheck="false" placeholder="(понедельник)&#10;@[1] {09:00}&#10;[] @(1) { Задача | описание }"></textarea>
       <div class="modal-actions">
         <button type="button" class="modal-btn ghost" data-close="modal-code">Отмена</button>
         <button type="button" class="modal-btn accent" id="btn-save-code">Сохранить</button>

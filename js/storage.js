@@ -1,15 +1,18 @@
 /**
- * Cloudflare KV — store v2 (дни + lists + streak).
+ * Cloudflare KV — store v2 (дни {slots,items} + lists + streak).
  */
 
 import {
   emptyStore,
+  emptyDay,
   parseTaskCode,
   applyCode,
   serializeToCode,
   migrateFromV1,
   isV2,
   DAYS,
+  finalizeSlots,
+  ensureDay,
 } from "./model.js";
 
 function tg() {
@@ -45,29 +48,28 @@ async function apiPut(store) {
   return res.json();
 }
 
+function normalizeDayData(raw) {
+  if (!raw) return emptyDay();
+  if (Array.isArray(raw)) return { slots: [], items: raw };
+  return {
+    slots: finalizeSlots(raw.slots || []),
+    items: Array.isArray(raw.items) ? raw.items : [],
+  };
+}
+
 function normalize(data) {
   if (!data) return emptyStore();
-  if (isV2(data) && data.version === 2) {
+  if (isV2(data)) {
     const store = emptyStore();
-    for (const d of DAYS) store[d] = Array.isArray(data[d]) ? data[d] : [];
+    for (const d of DAYS) store[d] = normalizeDayData(data[d]);
     store.lists = data.lists || {};
     store.streak = { ...store.streak, ...(data.streak || {}) };
     store.version = 2;
     store.updatedAt = data.updatedAt || null;
     return store;
   }
-  // v1 → v2
   if (data.days || data.template || data.completions || data.extraTasks) {
     return migrateFromV1(data);
-  }
-  // already day-keyed without version
-  if (DAYS.some((d) => Array.isArray(data[d]))) {
-    const store = emptyStore();
-    for (const d of DAYS) store[d] = Array.isArray(data[d]) ? data[d] : [];
-    store.lists = data.lists || {};
-    store.streak = { ...store.streak, ...(data.streak || {}) };
-    store.version = 2;
-    return store;
   }
   return migrateFromV1(data);
 }
@@ -76,8 +78,10 @@ export async function loadStore() {
   const payload = await apiGet();
   if (payload.exists && payload.data) {
     const store = normalize(payload.data);
-    // сразу сохранить в новом формате, если была миграция
-    if (payload.data.version !== 2) {
+    const needsRewrite =
+      payload.data.version !== 2 ||
+      DAYS.some((d) => Array.isArray(payload.data[d]));
+    if (needsRewrite) {
       try {
         await saveStore(store);
       } catch (_) {}
@@ -102,15 +106,19 @@ export async function loadStore() {
 export async function saveStore(store) {
   store.version = 2;
   store.updatedAt = new Date().toISOString();
-  // убрать legacy-поля если вдруг остались
   const clean = emptyStore();
-  for (const d of DAYS) clean[d] = store[d] || [];
+  for (const d of DAYS) {
+    const day = ensureDay(store, d);
+    clean[d] = {
+      slots: finalizeSlots(day.slots),
+      items: day.items || [],
+    };
+  }
   clean.lists = store.lists || {};
   clean.streak = store.streak || clean.streak;
   clean.version = 2;
   clean.updatedAt = store.updatedAt;
   await apiPut(clean);
-  // синхронизировать ссылку
   Object.assign(store, clean);
 }
 
