@@ -294,21 +294,25 @@ function renderSlotBoundary(time, accent) {
 }
 
 function renderTasks(opts = {}) {
-  const { scrollToActive = false, autoExpandSmall = false } = opts;
+  const { scrollToActive = false } = opts;
   const list = $("#task-list");
   const groups = groupDayBySlots(state.store, state.selectedDay);
 
   $("#current-day-label").textContent = capitalize(state.selectedDay);
 
-  if (state.editMode || autoExpandSmall) {
+  if (state.editMode) {
     for (const g of groups) {
       for (const item of g.items) {
-        const n = item.tasks?.length || 0;
-        if (n <= 0) continue;
-        // адаптивные списки при запуске не раскрываем
-        if (item.kind === "listref" || item.fromList) continue;
-        if (state.editMode) state.expanded.add(itemId(item.index));
-        else if (autoExpandSmall && n <= 5) state.expanded.add(itemId(item.index));
+        if (item.tasks?.length) state.expanded.add(itemId(item.index));
+      }
+    }
+  } else {
+    // адаптивные списки никогда не держим раскрытыми «сами»
+    for (const g of groups) {
+      for (const item of g.items) {
+        if (item.kind === "listref" || item.fromList) {
+          state.expanded.delete(itemId(item.index));
+        }
       }
     }
   }
@@ -1132,8 +1136,12 @@ async function boot() {
   } catch (_) {}
 
   state.selectedDay = dayNameFromDate(new Date());
+  // сброс раскрытий списков при старте
+  for (const id of [...state.expanded]) {
+    if (String(id).startsWith("L")) state.expanded.delete(id);
+  }
   renderDayMenu();
-  renderTasks({ scrollToActive: true, autoExpandSmall: true });
+  renderTasks({ scrollToActive: true });
   renderStreak();
   syncTelegramChrome();
 
