@@ -236,7 +236,7 @@ textarea {
   padding: 4px 14px 20px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 1px;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: none;
   -ms-overflow-style: none;
@@ -298,7 +298,7 @@ textarea {
 }
 
 .slot-boundary-gap {
-  /* выравнивание под колонку карточек */
+  min-height: 0;
 }
 
 .slot-time {
@@ -790,6 +790,25 @@ body.lists-edit-mode .lists-root .expand-btn {
   color: var(--accent);
   filter: drop-shadow(0 8px 24px color-mix(in srgb, var(--accent) 40%, transparent));
   animation: flicker 2.8s ease-in-out infinite;
+  transition: color 0.15s, filter 0.15s, transform 0.25s;
+}
+
+.flame-wrap.flame-muted {
+  color: #8e8e93;
+  filter: none;
+  animation: none;
+}
+
+.flame-wrap.flame-ignite {
+  color: #ff6b00;
+  filter: drop-shadow(0 0 28px rgba(255, 107, 0, 0.65));
+  animation: flame-burst 0.55s ease-out;
+}
+
+@keyframes flame-burst {
+  0% { transform: scale(0.85); filter: drop-shadow(0 0 0 transparent); }
+  40% { transform: scale(1.18); filter: drop-shadow(0 0 36px rgba(255, 107, 0, 0.85)); }
+  100% { transform: scale(1); filter: drop-shadow(0 0 28px rgba(255, 107, 0, 0.65)); }
 }
 
 @keyframes flicker {
@@ -802,6 +821,67 @@ body.lists-edit-mode .lists-root .expand-btn {
   font-weight: 800;
   color: var(--accent);
   letter-spacing: -0.03em;
+}
+
+.streak-count.streak-pop {
+  animation: streak-pop 0.55s ease-out;
+}
+
+@keyframes streak-pop {
+  0% { transform: scale(0.7); opacity: 0.4; }
+  50% { transform: scale(1.15); opacity: 1; }
+  100% { transform: scale(1); }
+}
+
+.day-dot.dot-pop {
+  animation: dot-pop 0.55s ease-out;
+}
+
+@keyframes dot-pop {
+  0% { transform: scale(0.5); }
+  45% { transform: scale(1.25); }
+  100% { transform: scale(1); }
+}
+
+/* ===== Celebration ===== */
+.celebrate-layer {
+  pointer-events: none;
+}
+
+.celebrate-layer.hidden {
+  display: none;
+}
+
+.celebrate-blur {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  background: color-mix(in srgb, var(--bg) 40%, transparent);
+}
+
+.confetti-canvas {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 202;
+}
+
+body.celebrating #tab-streak.active {
+  position: fixed;
+  inset: 0;
+  z-index: 201;
+  display: flex !important;
+  background: transparent;
+  padding-top: 48px;
+}
+
+body.celebrating #tab-streak .streak-hero,
+body.celebrating #tab-streak .week-calendar {
+  position: relative;
+  z-index: 1;
 }
 
 .week-calendar {

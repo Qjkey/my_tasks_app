@@ -19,7 +19,13 @@ import {
   ensureDay,
 } from "./model.js";
 import { loadStore, saveStore, applyTemplate, getCodeText } from "./storage.js";
-import { evaluateStreak, weekStatus, pluralDays, ensureWeekTaskStatuses } from "./streak.js";
+import {
+  evaluateStreak,
+  weekStatus,
+  pluralDays,
+  ensureWeekTaskStatuses,
+  isDayFullyDone,
+} from "./streak.js";
 
 const DELETE_ICON = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
   <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
@@ -39,10 +45,11 @@ const state = {
   selectedDay: dayNameFromDate(new Date()),
   editMode: false,
   listsEditMode: false,
-  addTarget: null, // null = day task; { listId } = list subtask
+  addTarget: null, // null | { listId } | { newList: true }
   expanded: new Set(),
   descOpen: new Set(),
   tab: "week",
+  celebrating: false,
 };
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -286,16 +293,19 @@ function renderSlotBoundary(time, accent) {
   </div>`;
 }
 
-function renderTasks() {
+function renderTasks(opts = {}) {
+  const { scrollToActive = false, autoExpandSmall = false } = opts;
   const list = $("#task-list");
   const groups = groupDayBySlots(state.store, state.selectedDay);
 
   $("#current-day-label").textContent = capitalize(state.selectedDay);
 
-  if (state.editMode) {
+  if (state.editMode || autoExpandSmall) {
     for (const g of groups) {
       for (const item of g.items) {
-        if (item.tasks?.length) state.expanded.add(itemId(item.index));
+        const n = item.tasks?.length || 0;
+        if (state.editMode && n > 0) state.expanded.add(itemId(item.index));
+        else if (autoExpandSmall && n > 0 && n <= 5) state.expanded.add(itemId(item.index));
       }
     }
   }
@@ -318,6 +328,22 @@ function renderTasks() {
   });
 
   list.innerHTML = parts.join("");
+
+  if (scrollToActive) {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => scrollTaskListToActive());
+    });
+  }
+}
+
+function scrollTaskListToActive() {
+  const list = $("#task-list");
+  if (!list) return;
+  const active = list.querySelector(".slot-block.active");
+  if (!active) return;
+  const max = Math.max(0, list.scrollHeight - list.clientHeight);
+  const target = Math.min(Math.max(0, active.offsetTop - 12), max);
+  list.scrollTop = target;
 }
 
 function renderStreak() {
@@ -371,13 +397,20 @@ function renderLists() {
   );
 
   if (!entries.length) {
-    root.innerHTML = `<p class="lists-empty">Пока нет адаптивных списков.<br/>В коде после дней добавьте:<br/><code>[{1}] { Покупки }</code><br/><code>    - { Молоко }</code><br/>А в дне закрепите: <code>[{1}]</code></p>`;
+    root.innerHTML = state.listsEditMode
+      ? `<p class="lists-empty soft">Нажмите «Добавить», чтобы создать список</p>`
+      : `<p class="lists-empty">Пока нет адаптивных списков.<br/>В коде после дней добавьте:<br/><code>[{1}] { Покупки }</code><br/><code>    - { Молоко }</code><br/>А в дне закрепите: <code>[{1}]</code></p>`;
     return;
   }
 
   if (state.listsEditMode) {
     for (const [listId] of entries) {
       state.expanded.add(listViewId(listId));
+    }
+  } else {
+    for (const [listId, list] of entries) {
+      const n = list.tasks?.length || 0;
+      if (n > 0 && n <= 5) state.expanded.add(listViewId(listId));
     }
   }
 
@@ -389,8 +422,9 @@ function renderLists() {
       const done = !!list.status;
       const { doneCount, total } = subProgress(tasks);
       const hasSubs = tasks.length > 0;
+      const draftMark = list.draft ? " draft-list" : "";
 
-      return `<article class="task-card ${open ? "expanded" : ""}" data-id="${id}" data-list-id="${listId}" data-kind="list">
+      return `<article class="task-card ${open ? "expanded" : ""}${draftMark}" data-id="${id}" data-list-id="${listId}" data-kind="list">
         <div class="task-row">
           <button type="button" class="check ${done ? "done" : ""}" data-list-toggle="${listId}" data-parent-toggle="1" aria-label="Готово"></button>
           <div class="title-wrap">
@@ -441,7 +475,7 @@ function renderLists() {
           }
           ${
             state.listsEditMode
-              ? `<button type="button" class="add-sub-row" data-add-list-sub="${listId}">+ Добавить пункт</button>`
+              ? `<button type="button" class="add-sub-row" data-add-list-sub="${listId}">+ Добавить задачу</button>`
               : ""
           }
         </div></div>
@@ -458,12 +492,54 @@ function toggleEdit(force) {
   renderTasks();
 }
 
+function nextListId() {
+  const ids = Object.keys(state.store.lists || {})
+    .map(Number)
+    .filter((n) => !Number.isNaN(n));
+  return String((ids.length ? Math.max(...ids) : 0) + 1);
+}
+
+/** Убрать черновики без задач; снять draft у сохранённых */
+function finalizeDraftLists() {
+  const lists = state.store.lists || {};
+  for (const [id, list] of Object.entries(lists)) {
+    if (!list.draft) continue;
+    if (!(list.tasks && list.tasks.length)) {
+      delete lists[id];
+    } else {
+      delete list.draft;
+    }
+  }
+}
+
 function toggleListsEdit(force) {
-  state.listsEditMode = typeof force === "boolean" ? force : !state.listsEditMode;
+  const next = typeof force === "boolean" ? force : !state.listsEditMode;
+  if (state.listsEditMode && !next) {
+    finalizeDraftLists();
+    state.listsEditMode = false;
+    document.body.classList.remove("lists-edit-mode");
+    $("#btn-lists-edit")?.classList.remove("active");
+    $("#lists-edit-toolbar")?.classList.add("hidden");
+    renderLists();
+    persist({ skipCelebrate: true });
+    return;
+  }
+  state.listsEditMode = next;
   document.body.classList.toggle("lists-edit-mode", state.listsEditMode);
   $("#btn-lists-edit")?.classList.toggle("active", state.listsEditMode);
   $("#lists-edit-toolbar")?.classList.toggle("hidden", !state.listsEditMode);
   renderLists();
+}
+
+function openAddNewListModal() {
+  state.addTarget = { newList: true };
+  $("#modal-add-title").textContent = "Новый список";
+  $("#add-task-input").value = "";
+  $("#add-task-input").placeholder = "Название списка";
+  $("#add-task-desc").value = "";
+  $("#add-task-desc").placeholder = "Описание (необязательно, до 256)";
+  openModal("modal-add");
+  setTimeout(() => $("#add-task-input").focus(), 50);
 }
 
 function playPressAnim(card) {
@@ -505,20 +581,156 @@ function refreshDoneUI() {
   }
 }
 
-async function persist() {
+async function persist(opts = {}) {
+  const { skipCelebrate = false } = opts;
+  const todayKey = toDateKey(new Date());
+  const todayName = dayNameFromDate(new Date());
+  const wasDone = !!state.store.streak?.history?.[todayKey];
+
   const before = state.store.streak?.count || 0;
   evaluateStreak(state.store, new Date());
   const after = state.store.streak?.count || 0;
+  const nowDone = !!state.store.streak?.history?.[todayKey];
+
   try {
     await saveStore(state.store);
   } catch (err) {
     console.error(err);
     tg()?.showAlert?.("Не удалось сохранить в KV. Проверьте привязку PLANER_KV.");
   }
+
   renderStreak();
-  if (after > before) {
+
+  if (!skipCelebrate && !wasDone && nowDone && isDayFullyDone(state.store, todayName)) {
+    playStreakCelebration();
+  } else if (after > before) {
     tg()?.HapticFeedback?.notificationOccurred?.("success");
   }
+}
+
+function ensureCelebrateLayer() {
+  let layer = $("#celebrate-layer");
+  if (layer) return layer;
+  layer = document.createElement("div");
+  layer.id = "celebrate-layer";
+  layer.className = "celebrate-layer hidden";
+  layer.innerHTML = `
+    <div class="celebrate-blur" aria-hidden="true"></div>
+    <canvas id="confetti-canvas" class="confetti-canvas"></canvas>
+  `;
+  document.body.appendChild(layer);
+  return layer;
+}
+
+function runConfetti(durationMs = 2200) {
+  const canvas = $("#confetti-canvas");
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const resize = () => {
+    canvas.width = Math.floor(window.innerWidth * dpr);
+    canvas.height = Math.floor(window.innerHeight * dpr);
+    canvas.style.width = `${window.innerWidth}px`;
+    canvas.style.height = `${window.innerHeight}px`;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  };
+  resize();
+
+  const colors = ["#ff6b00", "#ff9f0a", "#ffd60a", "#3390ec", "#ff453a", "#ffffff"];
+  const parts = [];
+  const spawn = (side) => {
+    for (let i = 0; i < 28; i++) {
+      const fromLeft = side === "left";
+      parts.push({
+        x: fromLeft ? -10 : window.innerWidth + 10,
+        y: Math.random() * window.innerHeight * 0.75,
+        vx: (fromLeft ? 1 : -1) * (3 + Math.random() * 6),
+        vy: -2 + Math.random() * 4,
+        g: 0.08 + Math.random() * 0.1,
+        w: 4 + Math.random() * 5,
+        h: 6 + Math.random() * 8,
+        rot: Math.random() * Math.PI,
+        vr: (Math.random() - 0.5) * 0.3,
+        color: colors[(Math.random() * colors.length) | 0],
+      });
+    }
+  };
+  spawn("left");
+  spawn("right");
+
+  const start = performance.now();
+  let raf = 0;
+  const tick = (t) => {
+    const elapsed = t - start;
+    ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+    for (const p of parts) {
+      p.x += p.vx;
+      p.vy += p.g;
+      p.y += p.vy;
+      p.rot += p.vr;
+      p.vx *= 0.995;
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rot);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+      ctx.restore();
+    }
+    if (elapsed < durationMs) raf = requestAnimationFrame(tick);
+    else ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+  };
+  raf = requestAnimationFrame(tick);
+  return () => cancelAnimationFrame(raf);
+}
+
+function playStreakCelebration() {
+  if (state.celebrating) return;
+  state.celebrating = true;
+
+  setTab("streak");
+  renderStreak();
+
+  const layer = ensureCelebrateLayer();
+  layer.classList.remove("hidden");
+  document.body.classList.add("celebrating");
+
+  const wrap = $(".flame-wrap");
+  const countEl = $("#streak-count");
+  const todayDot = $("#week-calendar-row .day-dot.today");
+
+  wrap?.classList.add("flame-muted");
+  wrap?.classList.remove("flame-ignite");
+  countEl?.classList.remove("streak-pop");
+  todayDot?.classList.remove("dot-pop");
+
+  try {
+    tg()?.HapticFeedback?.notificationOccurred?.("success");
+    tg()?.HapticFeedback?.impactOccurred?.("heavy");
+  } catch (_) {}
+
+  const stopConfetti = runConfetti(2400);
+
+  requestAnimationFrame(() => {
+    setTimeout(() => {
+      wrap?.classList.remove("flame-muted");
+      wrap?.classList.add("flame-ignite");
+      countEl?.classList.add("streak-pop");
+      todayDot?.classList.add("done", "dot-pop");
+      try {
+        tg()?.HapticFeedback?.impactOccurred?.("medium");
+      } catch (_) {}
+    }, 180);
+  });
+
+  setTimeout(() => {
+    stopConfetti?.();
+    layer.classList.add("hidden");
+    document.body.classList.remove("celebrating");
+    wrap?.classList.remove("flame-muted", "flame-ignite");
+    countEl?.classList.remove("streak-pop");
+    todayDot?.classList.remove("dot-pop");
+    state.celebrating = false;
+  }, 2800);
 }
 
 function openModal(id) {
@@ -527,6 +739,8 @@ function openModal(id) {
 
 function closeModal(id) {
   $(`#${id}`).classList.add("hidden");
+  $("#add-task-input").placeholder = "Название задачи";
+  $("#add-task-desc").placeholder = "Описание (необязательно, до 256)";
 }
 
 function openAddModal(target = null) {
@@ -535,10 +749,12 @@ function openAddModal(target = null) {
   if (isList) {
     const list = state.store.lists?.[String(target.listId)];
     $("#modal-add-title").textContent = list?.title
-      ? `Пункт: ${list.title}`
-      : "Новый пункт списка";
+      ? `Задача: ${list.title}`
+      : "Новая задача списка";
+    $("#add-task-input").placeholder = "Название задачи";
   } else {
     $("#modal-add-title").textContent = "Новая задача";
+    $("#add-task-input").placeholder = "Название задачи";
   }
   $("#add-task-input").value = "";
   $("#add-task-desc").value = "";
@@ -551,6 +767,22 @@ function addTask(title, description = "") {
   if (!title) return;
   description = String(description || "").trim().slice(0, DESC_MAX);
 
+  if (state.addTarget?.newList) {
+    if (!state.store.lists) state.store.lists = {};
+    const id = nextListId();
+    state.store.lists[id] = {
+      title,
+      subtitle: description,
+      status: 0,
+      tasks: [],
+      draft: true,
+    };
+    state.expanded.add(listViewId(id));
+    state.addTarget = null;
+    renderLists();
+    return;
+  }
+
   if (state.addTarget?.listId != null) {
     const list = state.store.lists?.[String(state.addTarget.listId)];
     if (!list) return;
@@ -559,7 +791,7 @@ function addTask(title, description = "") {
     state.expanded.add(listViewId(state.addTarget.listId));
     state.addTarget = null;
     renderLists();
-    persist();
+    if (!list.draft) persist({ skipCelebrate: true });
     return;
   }
 
@@ -692,7 +924,7 @@ function bindEvents() {
   $("#btn-to-streak").addEventListener("click", () => setTab("streak"));
   $("#btn-lists-edit")?.addEventListener("click", () => toggleListsEdit());
   $("#btn-lists-done")?.addEventListener("click", () => toggleListsEdit(false));
-  $("#btn-lists-add")?.addEventListener("click", () => openAddListSubModal());
+  $("#btn-lists-add")?.addEventListener("click", () => openAddNewListModal());
 
   $("#task-list").addEventListener("click", (e) => {
     const delSub = e.target.closest("[data-delete-sub]");
@@ -895,13 +1127,15 @@ async function boot() {
 
   state.selectedDay = dayNameFromDate(new Date());
   renderDayMenu();
-  renderTasks();
+  renderTasks({ scrollToActive: true, autoExpandSmall: true });
   renderStreak();
   syncTelegramChrome();
 
   // обновлять активный слот раз в минуту
   setInterval(() => {
-    if (state.tab === "week" && state.store) renderTasks();
+    if (state.tab === "week" && state.store && !state.celebrating) {
+      renderTasks();
+    }
   }, 60_000);
 }
 

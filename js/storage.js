@@ -114,12 +114,25 @@ export async function saveStore(store) {
       items: day.items || [],
     };
   }
-  clean.lists = store.lists || {};
+
+  // пустые черновики не пишем в KV, но оставляем в памяти
+  const emptyDrafts = {};
+  clean.lists = {};
+  for (const [id, list] of Object.entries(store.lists || {})) {
+    if (list.draft && !(list.tasks && list.tasks.length)) {
+      emptyDrafts[id] = list;
+      continue;
+    }
+    const { draft, ...rest } = list;
+    clean.lists[id] = rest;
+  }
+
   clean.streak = store.streak || clean.streak;
   clean.version = 2;
   clean.updatedAt = store.updatedAt;
   await apiPut(clean);
   Object.assign(store, clean);
+  Object.assign(store.lists, emptyDrafts);
 }
 
 export function applyTemplate(store, codeText) {
