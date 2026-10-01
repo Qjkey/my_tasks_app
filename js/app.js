@@ -304,8 +304,11 @@ function renderTasks(opts = {}) {
     for (const g of groups) {
       for (const item of g.items) {
         const n = item.tasks?.length || 0;
-        if (state.editMode && n > 0) state.expanded.add(itemId(item.index));
-        else if (autoExpandSmall && n > 0 && n <= 5) state.expanded.add(itemId(item.index));
+        if (n <= 0) continue;
+        // адаптивные списки при запуске не раскрываем
+        if (item.kind === "listref" || item.fromList) continue;
+        if (state.editMode) state.expanded.add(itemId(item.index));
+        else if (autoExpandSmall && n <= 5) state.expanded.add(itemId(item.index));
       }
     }
   }
@@ -341,9 +344,17 @@ function scrollTaskListToActive() {
   if (!list) return;
   const active = list.querySelector(".slot-block.active");
   if (!active) return;
+
+  // начало слота: у первого — в rail блока, у остальных — boundary перед ним
+  let anchor = active;
+  const prev = active.previousElementSibling;
+  if (prev?.classList.contains("slot-boundary")) anchor = prev;
+
   const max = Math.max(0, list.scrollHeight - list.clientHeight);
-  const target = Math.min(Math.max(0, active.offsetTop - 12), max);
-  list.scrollTop = target;
+  const listRect = list.getBoundingClientRect();
+  const anchorRect = anchor.getBoundingClientRect();
+  const target = list.scrollTop + (anchorRect.top - listRect.top);
+  list.scrollTop = Math.min(Math.max(0, Math.round(target)), max);
 }
 
 function renderStreak() {
@@ -406,11 +417,6 @@ function renderLists() {
   if (state.listsEditMode) {
     for (const [listId] of entries) {
       state.expanded.add(listViewId(listId));
-    }
-  } else {
-    for (const [listId, list] of entries) {
-      const n = list.tasks?.length || 0;
-      if (n > 0 && n <= 5) state.expanded.add(listViewId(listId));
     }
   }
 
