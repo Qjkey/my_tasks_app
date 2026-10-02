@@ -487,6 +487,16 @@ textarea {
   opacity: 1;
 }
 
+.sub-progress.urgent {
+  color: var(--danger);
+  opacity: 1;
+}
+
+.check.urgent:not(.done) {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--danger) 35%, transparent);
+}
+
 .task-desc {
   display: grid;
   grid-template-rows: 0fr;

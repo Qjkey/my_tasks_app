@@ -26,6 +26,11 @@ import {
   ensureWeekTaskStatuses,
   isDayFullyDone,
 } from "./streak.js";
+import {
+  isHomeworkList,
+  isHomeworkUrgent,
+  homeworkListHasUrgent,
+} from "./homework.js";
 
 const DELETE_ICON = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
   <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
@@ -159,12 +164,17 @@ function descBlock(id, text) {
 }
 
 function trailingSlot(opts) {
-  const { id, hasSubs, hasDesc, deleteAttr, doneCount, total } = opts;
+  const { id, hasSubs, hasDesc, deleteAttr, doneCount, total, urgent } = opts;
   if (state.editMode) {
     return `<button type="button" class="delete-btn" ${deleteAttr} aria-label="Удалить">${DELETE_ICON}</button>`;
   }
   if (hasSubs) {
-    const progClass = doneCount >= total ? "complete" : "";
+    const progClass = [
+      doneCount >= total ? "complete" : "",
+      urgent ? "urgent" : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
     return `<div class="row-trailing">
       <span class="sub-progress ${progClass}">${doneCount}/${total}</span>
       <button type="button" class="expand-btn" data-expand="${id}" aria-label="Подзадачи">${CHEVRON_ICON}</button>
@@ -182,6 +192,18 @@ function subProgress(tasks) {
   return { doneCount, total };
 }
 
+function homeworkMetaForItem(item) {
+  if (!(item.kind === "listref" || item.fromList) || item.listId == null) {
+    return { isHw: false, listUrgent: false };
+  }
+  const list = state.store.lists?.[String(item.listId)];
+  if (!isHomeworkList(list)) return { isHw: false, listUrgent: false };
+  return {
+    isHw: true,
+    listUrgent: homeworkListHasUrgent(list),
+  };
+}
+
 function renderTaskCard(item) {
   const id = itemId(item.index);
   const hasSubs = item.tasks?.length > 0;
@@ -190,6 +212,7 @@ function renderTaskCard(item) {
   const desc = item.subtitle || "";
   const showDesc = !!desc;
   const { doneCount, total } = subProgress(item.tasks);
+  const { isHw, listUrgent } = homeworkMetaForItem(item);
 
   const subs = hasSubs
     ? `<div class="subtasks"><div class="subtasks-inner">
@@ -198,9 +221,10 @@ function renderTaskCard(item) {
             const sid = subId(item.index, si);
             const subDesc = s.subtitle || "";
             const subDone = !!s.status;
+            const urgent = isHw && !subDone && isHomeworkUrgent(s.title);
             return `<div class="sub-block" data-sub-wrap="${sid}">
               <div class="task-row sub" data-item-index="${item.index}" data-sub-index="${si}">
-                <button type="button" class="check ${subDone ? "done" : ""}" data-toggle-item="${item.index}" data-toggle-sub="${si}" aria-label="Готово"></button>
+                <button type="button" class="check ${subDone ? "done" : ""} ${urgent ? "urgent" : ""}" data-toggle-item="${item.index}" data-toggle-sub="${si}" aria-label="Готово"></button>
                 <div class="title-wrap">
                   <span class="task-title ${subDone ? "done" : ""}">${escapeHtml(s.title)}</span>
                 </div>
@@ -233,6 +257,7 @@ function renderTaskCard(item) {
         deleteAttr: `data-delete-item="${item.index}"`,
         doneCount,
         total,
+        urgent: listUrgent,
       })}
     </div>
     ${descBlock(id, desc)}
@@ -433,6 +458,8 @@ function renderLists() {
       const { doneCount, total } = subProgress(tasks);
       const hasSubs = tasks.length > 0;
       const draftMark = list.draft ? " draft-list" : "";
+      const isHw = isHomeworkList(list);
+      const listUrgent = isHw && homeworkListHasUrgent(list);
 
       return `<article class="task-card ${open ? "expanded" : ""}${draftMark}" data-id="${id}" data-list-id="${listId}" data-kind="list">
         <div class="task-row">
@@ -446,7 +473,7 @@ function renderLists() {
               ? `<button type="button" class="delete-btn" data-delete-list="${listId}" aria-label="Удалить список">${DELETE_ICON}</button>`
               : hasSubs
                 ? `<div class="row-trailing">
-                    <span class="sub-progress ${doneCount >= total ? "complete" : ""}">${doneCount}/${total}</span>
+                    <span class="sub-progress ${doneCount >= total ? "complete" : ""} ${listUrgent ? "urgent" : ""}">${doneCount}/${total}</span>
                     <button type="button" class="expand-btn" data-expand="${id}" aria-label="Пункты">${CHEVRON_ICON}</button>
                   </div>`
                 : list.subtitle
@@ -461,9 +488,10 @@ function renderLists() {
               .map((s, si) => {
                 const sid = listSubId(listId, si);
                 const subDesc = s.subtitle || "";
+                const urgent = isHw && !s.status && isHomeworkUrgent(s.title);
                 return `<div class="sub-block">
                   <div class="task-row sub" data-list-id="${listId}" data-sub-index="${si}">
-                    <button type="button" class="check ${s.status ? "done" : ""}" data-list-toggle="${listId}" data-list-sub="${si}" aria-label="Готово"></button>
+                    <button type="button" class="check ${s.status ? "done" : ""} ${urgent ? "urgent" : ""}" data-list-toggle="${listId}" data-list-sub="${si}" aria-label="Готово"></button>
                     <div class="title-wrap">
                       <span class="task-title ${s.status ? "done" : ""}">${escapeHtml(s.title)}</span>
                     </div>
@@ -495,7 +523,17 @@ function renderLists() {
 }
 
 function toggleEdit(force) {
-  state.editMode = typeof force === "boolean" ? force : !state.editMode;
+  const next = typeof force === "boolean" ? force : !state.editMode;
+  // выход из редактирования — свернуть все группы/подзадачи как до edit
+  if (state.editMode && !next) {
+    for (const id of [...state.expanded]) {
+      if (String(id).startsWith("i")) state.expanded.delete(id);
+    }
+    for (const id of [...state.descOpen]) {
+      if (String(id).startsWith("i")) state.descOpen.delete(id);
+    }
+  }
+  state.editMode = next;
   document.body.classList.toggle("edit-mode", state.editMode);
   $("#btn-edit").classList.toggle("active", state.editMode);
   $("#edit-toolbar").classList.toggle("hidden", !state.editMode);
@@ -575,17 +613,21 @@ function refreshDoneUI() {
     mainCheck?.classList.toggle("done", done);
     mainTitle?.classList.toggle("done", done);
 
+    const { isHw, listUrgent } = homeworkMetaForItem(item);
     const prog = card.querySelector(":scope > .task-row .sub-progress");
     if (prog && item.tasks?.length) {
       const { doneCount, total } = subProgress(item.tasks);
       prog.textContent = `${doneCount}/${total}`;
       prog.classList.toggle("complete", doneCount >= total);
+      prog.classList.toggle("urgent", !!listUrgent);
     }
 
     (item.tasks || []).forEach((s, si) => {
       const row = card.querySelector(`.task-row.sub[data-sub-index="${si}"]`);
       if (!row) return;
+      const urgent = isHw && !s.status && isHomeworkUrgent(s.title);
       row.querySelector(".check")?.classList.toggle("done", !!s.status);
+      row.querySelector(".check")?.classList.toggle("urgent", !!urgent);
       row.querySelector(".task-title")?.classList.toggle("done", !!s.status);
     });
   }
