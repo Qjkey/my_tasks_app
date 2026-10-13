@@ -221,7 +221,7 @@ function renderTaskCard(item) {
             const sid = subId(item.index, si);
             const subDesc = s.subtitle || "";
             const subDone = !!s.status;
-            const urgent = isHw && !subDone && isHomeworkUrgent(s.title);
+            const urgent = isHw && !subDone && isHomeworkUrgent(s);
             return `<div class="sub-block" data-sub-wrap="${sid}">
               <div class="task-row sub" data-item-index="${item.index}" data-sub-index="${si}">
                 <button type="button" class="check ${subDone ? "done" : ""} ${urgent ? "urgent" : ""}" data-toggle-item="${item.index}" data-toggle-sub="${si}" aria-label="Готово"></button>
@@ -488,7 +488,7 @@ function renderLists() {
               .map((s, si) => {
                 const sid = listSubId(listId, si);
                 const subDesc = s.subtitle || "";
-                const urgent = isHw && !s.status && isHomeworkUrgent(s.title);
+                const urgent = isHw && !s.status && isHomeworkUrgent(s);
                 return `<div class="sub-block">
                   <div class="task-row sub" data-list-id="${listId}" data-sub-index="${si}">
                     <button type="button" class="check ${s.status ? "done" : ""} ${urgent ? "urgent" : ""}" data-list-toggle="${listId}" data-list-sub="${si}" aria-label="Готово"></button>
@@ -625,7 +625,7 @@ function refreshDoneUI() {
     (item.tasks || []).forEach((s, si) => {
       const row = card.querySelector(`.task-row.sub[data-sub-index="${si}"]`);
       if (!row) return;
-      const urgent = isHw && !s.status && isHomeworkUrgent(s.title);
+      const urgent = isHw && !s.status && isHomeworkUrgent(s);
       row.querySelector(".check")?.classList.toggle("done", !!s.status);
       row.querySelector(".check")?.classList.toggle("urgent", !!urgent);
       row.querySelector(".task-title")?.classList.toggle("done", !!s.status);
@@ -839,7 +839,12 @@ function addTask(title, description = "") {
     const list = state.store.lists?.[String(state.addTarget.listId)];
     if (!list) return;
     if (!list.tasks) list.tasks = [];
-    list.tasks.push({ title, subtitle: description, status: 0 });
+    list.tasks.push({
+      title,
+      subtitle: description,
+      status: 0,
+      createdAt: toDateKey(new Date()),
+    });
     state.expanded.add(listViewId(state.addTarget.listId));
     state.addTarget = null;
     renderLists();

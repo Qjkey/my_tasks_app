@@ -541,6 +541,7 @@ export function applyCode(store, codeText) {
           title: t.title,
           subtitle: t.subtitle || p?.subtitle || "",
           status: p?.status ? 1 : 0,
+          createdAt: p?.createdAt || t.createdAt || null,
         };
       }),
     };
