@@ -6,6 +6,7 @@
   <meta name="color-scheme" content="dark" />
   <title>Планер</title>
   <script src="js/tma.js"></script>
+  <link rel="preload" href="MacintoshSkeletalFilled%20(1).otf" as="font" type="font/otf" crossorigin />
   <link rel="stylesheet" href="css/style.css" />
 </head>
 <body class="welcome-active">
@@ -45,7 +46,7 @@
         <!-- filled by JS -->
       </div>
 
-      <div id="edit-toolbar" class="edit-toolbar hidden">
+      <div id="edit-toolbar" class="edit-toolbar sticky-group hidden">
         <button type="button" id="btn-add-task" class="toolbar-btn primary">Добавить</button>
         <button type="button" id="btn-paste-code" class="toolbar-btn">Код задач</button>
         <button type="button" id="btn-done-edit" class="toolbar-btn">Готово</button>
@@ -83,7 +84,7 @@
         <h1 class="lists-heading">Списки</h1>
         <span class="icon-btn ghost" aria-hidden="true"></span>
       </header>
-      <div id="lists-edit-toolbar" class="edit-toolbar hidden">
+      <div id="lists-edit-toolbar" class="edit-toolbar sticky-group hidden">
         <button type="button" id="btn-lists-add" class="toolbar-btn primary">Добавить</button>
         <button type="button" id="btn-lists-done" class="toolbar-btn">Готово</button>
       </div>
@@ -98,7 +99,7 @@
       <h2 id="modal-add-title">Новая задача</h2>
       <input type="text" id="add-task-input" class="modal-input" placeholder="Название задачи" maxlength="200" autocomplete="off" />
       <input type="text" id="add-task-desc" class="modal-input" placeholder="Описание (необязательно, до 256)" maxlength="256" autocomplete="off" />
-      <div class="modal-actions">
+      <div class="modal-actions sticky-group">
         <button type="button" class="modal-btn ghost" data-close="modal-add">Отмена</button>
         <button type="button" class="modal-btn accent" id="btn-confirm-add">Добавить</button>
       </div>
@@ -108,13 +109,49 @@
   <!-- Модалка кода задач -->
   <div id="modal-code" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="modal-code-title">
     <div class="modal-backdrop" data-close="modal-code"></div>
-    <div class="modal-sheet wide">
-      <h2 id="modal-code-title">Код задач</h2>
-      <p class="modal-hint">Слоты: @[1] {09:00} (последний до 22:00). Задачи: [] @(1) { … }. Повтор: [ 2н ]. Списки: [{1}] { … }, в дне: [{1}] @(2). Описание: | текст.</p>
+    <div class="modal-sheet wide" id="modal-code-sheet">
+      <header class="modal-code-header">
+        <button type="button" id="btn-code-info" class="icon-btn" title="Справка" aria-label="Справка по коду">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2">
+            <circle cx="12" cy="12" r="9"/><line x1="12" y1="10" x2="12" y2="16"/><circle cx="12" cy="7" r="0.8" fill="currentColor" stroke="none"/>
+          </svg>
+        </button>
+        <h2 id="modal-code-title">Код задач</h2>
+        <button type="button" id="btn-code-fullscreen" class="icon-btn" title="На весь экран" aria-label="На весь экран" aria-pressed="false">
+          <svg class="fs-expand" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/>
+            <line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/>
+          </svg>
+          <svg class="fs-collapse" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" hidden>
+            <polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/>
+            <line x1="10" y1="14" x2="3" y2="21"/><line x1="14" y1="10" x2="21" y2="3"/>
+          </svg>
+        </button>
+      </header>
       <textarea id="code-textarea" class="code-area" spellcheck="false" placeholder="(понедельник)&#10;@[1] {09:00}&#10;[] @(1) { Задача | описание } [ 2н ]"></textarea>
-      <div class="modal-actions">
+      <div class="modal-actions sticky-group">
         <button type="button" class="modal-btn ghost" data-close="modal-code">Отмена</button>
         <button type="button" class="modal-btn accent" id="btn-save-code">Сохранить</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Справка по коду задач -->
+  <div id="modal-code-help" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="modal-code-help-title">
+    <div class="modal-backdrop" data-close="modal-code-help"></div>
+    <div class="modal-sheet">
+      <h2 id="modal-code-help-title">Как писать код</h2>
+      <div class="modal-help-body">
+        <p><strong>День:</strong> <code>(понедельник)</code></p>
+        <p><strong>Слот:</strong> <code>@[1] {09:00}</code> — последний до 22:00</p>
+        <p><strong>Задача:</strong> <code>[] @(1) { Название | описание }</code></p>
+        <p><strong>Маркеры:</strong> <code>[]</code> ежедневно, <code>[x]</code> один раз, <code>[xx]</code> раз в неделю</p>
+        <p><strong>Группа:</strong> <code>[{}] @(1) { Дела }</code> и пункты <code>- { … }</code></p>
+        <p><strong>Повтор:</strong> <code>[ 2н ]</code>, <code>[ 3н ]</code>… после задачи или группы</p>
+        <p><strong>Список:</strong> <code>[{1}] { Покупки }</code>, в дне: <code>[{1}] @(2)</code></p>
+      </div>
+      <div class="modal-actions sticky-group">
+        <button type="button" class="modal-btn accent" data-close="modal-code-help" style="grid-column: 1 / -1">Понятно</button>
       </div>
     </div>
   </div>

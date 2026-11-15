@@ -11,7 +11,7 @@
   src: url("../MacintoshSkeletalFilled%20(1).otf") format("opentype");
   font-weight: 400;
   font-style: normal;
-  font-display: swap;
+  font-display: block;
 }
 
 :root {
@@ -199,10 +199,14 @@ textarea {
 .edit-toolbar {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
+  gap: 1px;
   padding: 0 14px 10px;
   background: var(--bg);
   animation: fade 0.2s ease;
+}
+
+#lists-edit-toolbar {
+  grid-template-columns: 1fr 1fr;
 }
 
 .edit-toolbar.hidden {
@@ -230,6 +234,27 @@ textarea {
 .toolbar-btn.primary {
   background: var(--accent);
   color: var(--button-text);
+}
+
+/* «слипнутые» скругления: с краю 50%, у стыка 15px */
+.sticky-group {
+  gap: 1px;
+}
+
+.sticky-group > :first-child:not(:last-child) {
+  border-radius: 50% 15px 15px 50%;
+}
+
+.sticky-group > :last-child:not(:first-child) {
+  border-radius: 15px 50% 50% 15px;
+}
+
+.sticky-group > :not(:first-child):not(:last-child) {
+  border-radius: 15px;
+}
+
+.sticky-group > :only-child {
+  border-radius: 22px;
 }
 
 @keyframes fade {
@@ -647,13 +672,8 @@ body.edit-mode .check {
   opacity: 0.45;
 }
 
+/* в редакторе группы/списки открываются только стрелкой */
 body.edit-mode .expand-btn {
-  pointer-events: none;
-  opacity: 0.45;
-}
-
-/* в редакторе адаптивные списки открываются стрелкой */
-body.edit-mode .task-card[data-kind="listref"] .expand-btn {
   pointer-events: auto;
   opacity: 1;
 }
@@ -721,8 +741,14 @@ body.lists-edit-mode .lists-root .check {
 }
 
 body.lists-edit-mode .lists-root .expand-btn {
-  pointer-events: none;
-  opacity: 0.45;
+  pointer-events: auto;
+  opacity: 1;
+}
+
+body.lists-edit-mode .lists-root .row-trailing.edit-trailing {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .lists-heading {
@@ -823,6 +849,12 @@ body.lists-edit-mode .lists-root .expand-btn {
   transition: color 0.15s, filter 0.15s, transform 0.25s;
 }
 
+.flame-wrap.streak-zero {
+  color: var(--text-muted);
+  filter: none;
+  animation: none;
+}
+
 .flame-wrap.flame-muted {
   color: #8e8e93;
   filter: none;
@@ -851,6 +883,10 @@ body.lists-edit-mode .lists-root .expand-btn {
   font-weight: 800;
   color: var(--accent);
   letter-spacing: -0.03em;
+}
+
+.streak-count.streak-zero {
+  color: var(--text-muted);
 }
 
 .streak-count.streak-pop {
@@ -998,7 +1034,7 @@ body.celebrating #tab-streak .week-calendar {
   position: relative;
   width: min(400px, 100%);
   background: var(--bg-elevated);
-  border-radius: 18px;
+  border-radius: 28px;
   padding: 20px 18px 16px;
   display: flex;
   flex-direction: column;
@@ -1011,6 +1047,25 @@ body.celebrating #tab-streak .week-calendar {
   max-height: min(80vh, 560px);
 }
 
+#modal-code.modal-fullscreen {
+  padding: 0;
+  align-items: stretch;
+}
+
+#modal-code.modal-fullscreen .modal-backdrop {
+  display: none;
+}
+
+#modal-code.modal-fullscreen .modal-sheet {
+  width: 100%;
+  max-width: none;
+  max-height: none;
+  height: 100%;
+  border-radius: 0;
+  border: none;
+  animation: none;
+}
+
 @keyframes sheet-up {
   from { transform: translateY(24px); opacity: 0; }
   to { transform: translateY(0); opacity: 1; }
@@ -1020,6 +1075,37 @@ body.celebrating #tab-streak .week-calendar {
   font-size: 1.15rem;
   font-weight: 700;
   text-align: center;
+}
+
+.modal-code-header {
+  display: grid;
+  grid-template-columns: 44px 1fr 44px;
+  align-items: center;
+  gap: 4px;
+}
+
+.modal-code-header h2 {
+  margin: 0;
+}
+
+.modal-help-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 0.9rem;
+  color: var(--text);
+  line-height: 1.45;
+  max-height: min(50vh, 360px);
+  overflow-y: auto;
+}
+
+.modal-help-body code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.82em;
+  background: var(--bg);
+  padding: 1px 5px;
+  border-radius: 6px;
+  color: var(--text);
 }
 
 .modal-hint {
@@ -1065,7 +1151,7 @@ body.celebrating #tab-streak .week-calendar {
 .modal-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 8px;
+  gap: 1px;
 }
 
 .modal-btn {
@@ -1143,6 +1229,11 @@ body.welcome-active #app {
   letter-spacing: 0.01em;
   color: var(--text);
   min-height: 2.4em;
+  visibility: hidden;
+}
+
+.welcome-greeting.font-ready {
+  visibility: visible;
 }
 
 .welcome-motto {

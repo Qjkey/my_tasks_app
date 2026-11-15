@@ -165,14 +165,10 @@ function descBlock(id, text) {
   </div>`;
 }
 
-function isListrefItem(item) {
-  return item.kind === "listref" || !!item.fromList;
-}
-
 function trailingSlot(opts) {
-  const { id, hasSubs, hasDesc, deleteAttr, doneCount, total, urgent, listref } = opts;
+  const { id, hasSubs, hasDesc, deleteAttr, doneCount, total, urgent } = opts;
   if (state.editMode) {
-    if (listref && hasSubs) {
+    if (hasSubs) {
       return `<div class="row-trailing edit-trailing">
         <button type="button" class="expand-btn" data-expand="${id}" aria-label="Открыть список">${CHEVRON_ICON}</button>
         <button type="button" class="delete-btn" ${deleteAttr} aria-label="Удалить">${DELETE_ICON}</button>
@@ -219,13 +215,8 @@ function homeworkMetaForItem(item) {
 function renderTaskCard(item) {
   const id = itemId(item.index);
   const hasSubs = item.tasks?.length > 0;
-  const listref = isListrefItem(item);
-  // адаптивные списки — только вручную; обычные группы в edit раскрыты
-  const expanded = listref
-    ? state.expanded.has(id)
-    : state.editMode
-      ? hasSubs
-      : state.expanded.has(id);
+  // в edit и вне — раскрытие только вручную (стрелка)
+  const expanded = state.expanded.has(id);
   const done = itemIsDone(item);
   const desc = item.subtitle || "";
   const showDesc = !!desc;
@@ -276,7 +267,6 @@ function renderTaskCard(item) {
         doneCount,
         total,
         urgent: listUrgent,
-        listref,
       })}
     </div>
     ${descBlock(id, desc)}
@@ -345,16 +335,6 @@ function renderTasks(opts = {}) {
 
   $("#current-day-label").textContent = capitalize(state.selectedDay);
 
-  if (state.editMode) {
-    // обычные группы с подзадачами раскрыты; listref — только вручную
-    for (const g of groups) {
-      for (const item of g.items) {
-        if (isListrefItem(item)) continue;
-        if (item.tasks?.length) state.expanded.add(itemId(item.index));
-      }
-    }
-  }
-
   const parts = [];
   groups.forEach((slot, i) => {
     const isFirst = i === 0;
@@ -402,8 +382,13 @@ function scrollTaskListToActive() {
 function renderStreak() {
   evaluateStreak(state.store, new Date());
   const streak = state.store.streak;
+  const count = streak.count || 0;
   const countEl = $("#streak-count");
-  if (countEl) countEl.textContent = pluralDays(streak.count || 0);
+  if (countEl) {
+    countEl.textContent = pluralDays(count);
+    countEl.classList.toggle("streak-zero", count === 0);
+  }
+  $(".flame-wrap")?.classList.toggle("streak-zero", count === 0);
 
   const head = $("#week-calendar-head");
   const row = $("#week-calendar-row");
@@ -456,20 +441,14 @@ function renderLists() {
     return;
   }
 
-  if (state.listsEditMode) {
-    for (const [listId] of entries) {
-      state.expanded.add(listViewId(listId));
-    }
-  }
-
   root.innerHTML = entries
     .map(([listId, list]) => {
       const id = listViewId(listId);
-      const open = state.listsEditMode || state.expanded.has(id);
+      const open = state.expanded.has(id);
       const tasks = list.tasks || [];
       const done = !!list.status;
       const { doneCount, total } = subProgress(tasks);
-      const hasSubs = tasks.length > 0;
+      const hasSubs = tasks.length > 0 || state.listsEditMode;
       const draftMark = list.draft ? " draft-list" : "";
       const isHw = isHomeworkList(list);
       const listUrgent = isHw && homeworkListHasUrgent(list);
@@ -479,12 +458,15 @@ function renderLists() {
           <button type="button" class="check ${done ? "done" : ""}" data-list-toggle="${listId}" data-parent-toggle="1" aria-label="Готово"></button>
           <div class="title-wrap">
             <span class="task-title ${done ? "done" : ""}">${escapeHtml(list.title)}</span>
-            ${infoInline(id, !!list.subtitle, !hasSubs || state.listsEditMode)}
+            ${infoInline(id, !!list.subtitle, !(tasks.length > 0) || state.listsEditMode)}
           </div>
           ${
             state.listsEditMode
-              ? `<button type="button" class="delete-btn" data-delete-list="${listId}" aria-label="Удалить список">${DELETE_ICON}</button>`
-              : hasSubs
+              ? `<div class="row-trailing edit-trailing">
+                  <button type="button" class="expand-btn" data-expand="${id}" aria-label="Открыть список">${CHEVRON_ICON}</button>
+                  <button type="button" class="delete-btn" data-delete-list="${listId}" aria-label="Удалить список">${DELETE_ICON}</button>
+                </div>`
+              : tasks.length > 0
                 ? `<div class="row-trailing">
                     <span class="sub-progress ${doneCount >= total ? "complete" : ""} ${listUrgent ? "urgent" : ""}">${doneCount}/${total}</span>
                     <button type="button" class="expand-btn" data-expand="${id}" aria-label="Пункты">${CHEVRON_ICON}</button>
@@ -544,19 +526,17 @@ function collapseDayExpanded() {
   }
 }
 
-function collapseListrefsInDay() {
-  if (!state.store) return;
-  const items = resolveDayItems(state.store, state.selectedDay);
-  for (const item of items) {
-    if (isListrefItem(item)) state.expanded.delete(itemId(item.index));
+function collapseListsExpanded() {
+  for (const id of [...state.expanded]) {
+    if (String(id).startsWith("L")) state.expanded.delete(id);
   }
 }
 
 function toggleEdit(force) {
   const next = typeof force === "boolean" ? force : !state.editMode;
   if (!state.editMode && next) {
-    // вход в редактор — все адаптивные списки свёрнуты
-    collapseListrefsInDay();
+    // вход в редактор — все группы/списки свёрнуты
+    collapseDayExpanded();
   }
   // выход из редактирования — свернуть все группы/подзадачи как до edit
   if (state.editMode && !next) {
@@ -593,6 +573,7 @@ function toggleListsEdit(force) {
   const next = typeof force === "boolean" ? force : !state.listsEditMode;
   if (state.listsEditMode && !next) {
     finalizeDraftLists();
+    collapseListsExpanded();
     state.listsEditMode = false;
     document.body.classList.remove("lists-edit-mode");
     $("#btn-lists-edit")?.classList.remove("active");
@@ -600,6 +581,9 @@ function toggleListsEdit(force) {
     renderLists();
     persist({ skipCelebrate: true });
     return;
+  }
+  if (!state.listsEditMode && next) {
+    collapseListsExpanded();
   }
   state.listsEditMode = next;
   document.body.classList.toggle("lists-edit-mode", state.listsEditMode);
@@ -814,14 +798,32 @@ function playStreakCelebration() {
   }, 2800);
 }
 
+function setCodeFullscreen(on) {
+  const modal = $("#modal-code");
+  const btn = $("#btn-code-fullscreen");
+  if (!modal || !btn) return;
+  modal.classList.toggle("modal-fullscreen", !!on);
+  btn.setAttribute("aria-pressed", on ? "true" : "false");
+  btn.title = on ? "Обычный режим" : "На весь экран";
+  btn.setAttribute("aria-label", on ? "Обычный режим" : "На весь экран");
+  const expand = btn.querySelector(".fs-expand");
+  const collapse = btn.querySelector(".fs-collapse");
+  if (expand) expand.hidden = !!on;
+  if (collapse) collapse.hidden = !on;
+}
+
 function openModal(id) {
+  if (id === "modal-code") setCodeFullscreen(false);
   $(`#${id}`).classList.remove("hidden");
 }
 
 function closeModal(id) {
+  if (id === "modal-code") setCodeFullscreen(false);
   $(`#${id}`).classList.add("hidden");
-  $("#add-task-input").placeholder = "Название задачи";
-  $("#add-task-desc").placeholder = "Описание (необязательно, до 256)";
+  if (id === "modal-add") {
+    $("#add-task-input").placeholder = "Название задачи";
+    $("#add-task-desc").placeholder = "Описание (необязательно, до 256)";
+  }
 }
 
 function openAddModal(target = null) {
@@ -1121,10 +1123,9 @@ function bindEvents() {
       return;
     }
 
-    if (state.listsEditMode) return;
-
     const expand = e.target.closest("[data-expand]");
     if (expand) {
+      e.stopPropagation();
       const id = expand.dataset.expand;
       if (state.expanded.has(id)) state.expanded.delete(id);
       else state.expanded.add(id);
@@ -1133,6 +1134,8 @@ function bindEvents() {
       else renderLists();
       return;
     }
+
+    if (state.listsEditMode) return;
 
     const toggle = e.target.closest("[data-list-toggle]");
     if (!toggle) return;
@@ -1177,6 +1180,16 @@ function bindEvents() {
   $("#btn-paste-code").addEventListener("click", () => {
     $("#code-textarea").value = getCodeText(state.store);
     openModal("modal-code");
+  });
+
+  $("#btn-code-info")?.addEventListener("click", () => {
+    openModal("modal-code-help");
+  });
+
+  $("#btn-code-fullscreen")?.addEventListener("click", () => {
+    const modal = $("#modal-code");
+    if (!modal) return;
+    setCodeFullscreen(!modal.classList.contains("modal-fullscreen"));
   });
 
   $("#btn-save-code").addEventListener("click", async () => {
@@ -1232,6 +1245,18 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+/** Ждём загрузку Macintosh Skeletal, чтобы не мигал системный шрифт */
+async function waitWelcomeFont() {
+  try {
+    if (!document.fonts?.load) return;
+    await Promise.race([
+      document.fonts.load('400 3rem "Macintosh Skeletal"'),
+      sleep(8000),
+    ]);
+    await document.fonts.ready;
+  } catch (_) {}
+}
+
 /** Приветственный экран уже в DOM; только анимация текста → пауза 3с → уход */
 async function playWelcomeSplash() {
   const p = ensureProfileFields();
@@ -1251,8 +1276,12 @@ async function playWelcomeSplash() {
   splash.classList.remove("leaving");
   splash.setAttribute("aria-hidden", "false");
   greetEl.textContent = "";
+  greetEl.classList.remove("font-ready");
   mottoEl.textContent = p.motto;
   mottoEl.classList.remove("show");
+
+  await waitWelcomeFont();
+  greetEl.classList.add("font-ready");
 
   // печать по символам (~0.9 с)
   const chars = [...full];
@@ -1273,6 +1302,7 @@ async function playWelcomeSplash() {
   splash.hidden = true;
   splash.setAttribute("aria-hidden", "true");
   greetEl.textContent = "";
+  greetEl.classList.remove("font-ready");
   mottoEl.classList.remove("show");
   document.body.classList.remove("welcome-active");
 }
@@ -1281,6 +1311,7 @@ async function boot() {
   initTelegram();
   renderDayMenu();
   bindEvents();
+  const fontReady = waitWelcomeFont();
 
   try {
     state.store = await loadStore();
@@ -1313,6 +1344,7 @@ async function boot() {
   renderStreak();
   syncTelegramChrome();
 
+  await fontReady;
   await playWelcomeSplash();
 
   // обновлять активный слот раз в минуту
