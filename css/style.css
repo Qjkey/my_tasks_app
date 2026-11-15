@@ -14,24 +14,60 @@
   font-display: block;
 }
 
-:root {
-  --bg: var(--tg-theme-secondary-bg-color, #1c1c1e);
-  --bg-elevated: var(--tg-theme-bg-color, #2c2c2e);
-  --card: var(--tg-theme-section-bg-color, #2c2c2e);
-  --text: var(--tg-theme-text-color, #f2f2f7);
-  --text-muted: var(--tg-theme-hint-color, #8e8e93);
-  --text-dim: var(--tg-theme-hint-color, #636366);
-  --accent: var(--tg-theme-button-color, #3390ec);
-  --accent-soft: var(--tg-theme-button-color, #3390ec);
-  --button-text: var(--tg-theme-button-text-color, #ffffff);
-  --flame: var(--tg-theme-button-color, #3390ec);
-  --nav-active: var(--tg-theme-section-bg-color, rgba(255, 255, 255, 0.08));
-  --border: rgba(255, 255, 255, 0.06);
-  --danger: #ff453a;
+/* Фиксированная палитра (тёмная по умолчанию) */
+:root,
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #000000;
+  --bg-elevated: #1e1e1e;
+  --card: #191918;
+  --header-bg: #252524;
+  --text: #ffffff;
+  --text-muted: #7d7d7d;
+  --text-dim: #7e7e7e;
+  --accent: #d1816c;
+  --accent-soft: #d1816c;
+  --accent-text: #d19b8d;
+  --section-header: #d8a593;
+  --link: #c38e80;
+  --button-text: #ffffff;
+  --flame: #d1816c;
+  --nav-active: #191918;
+  --border: #000000;
+  --danger: #ee686f;
+  --bottom-bar: #000000;
+  --modal-btn-bg: #000000;
+  --modal-btn-text: #ffffff;
   --radius: 10px;
   --radius-press: 4px;
   --radius-edge: 20px;
+  --sticky-r-outer: 50px;
+  --sticky-r-inner: 8px;
   --font: "SF Pro", -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Segoe UI", sans-serif;
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f1f1f3;
+  --bg-elevated: #ffffff;
+  --card: #ffffff;
+  --header-bg: #ffffff;
+  --text: #333333;
+  --text-muted: #a8a8a8;
+  --text-dim: #82868a;
+  --accent: #4da0eb;
+  --accent-soft: #4da0eb;
+  --accent-text: #3e96e8;
+  --section-header: #298acf;
+  --link: #298acf;
+  --button-text: #ffffff;
+  --flame: #4da0eb;
+  --nav-active: #ffffff;
+  --border: #e6e6e6;
+  --danger: #cc2929;
+  --bottom-bar: #f1f1f3;
+  --modal-btn-bg: #ffffff;
+  --modal-btn-text: #333333;
 }
 
 *,
@@ -92,7 +128,7 @@ textarea {
   padding: 12px 14px 8px;
   position: relative;
   z-index: 20;
-  background: var(--bg);
+  background: var(--header-bg);
 }
 
 .icon-btn {
@@ -236,25 +272,25 @@ textarea {
   color: var(--button-text);
 }
 
-/* «слипнутые» скругления: с краю ~половина (100px), у стыка 15px */
+/* «слипнутые» скругления: с краю 50px, у стыка одинаково 8px */
 .sticky-group {
   gap: 5px;
 }
 
 .sticky-group > :first-child:not(:last-child) {
-  border-radius: 100px 15px 15px 100px;
+  border-radius: var(--sticky-r-outer) var(--sticky-r-inner) var(--sticky-r-inner) var(--sticky-r-outer);
 }
 
 .sticky-group > :last-child:not(:first-child) {
-  border-radius: 15px 100px 100px 15px;
+  border-radius: var(--sticky-r-inner) var(--sticky-r-outer) var(--sticky-r-outer) var(--sticky-r-inner);
 }
 
 .sticky-group > :not(:first-child):not(:last-child) {
-  border-radius: 15px;
+  border-radius: var(--sticky-r-inner);
 }
 
 .sticky-group > :only-child {
-  border-radius: 100px;
+  border-radius: var(--sticky-r-outer);
 }
 
 @keyframes fade {
@@ -1034,7 +1070,7 @@ body.celebrating #tab-streak .week-calendar {
   position: relative;
   width: min(400px, 100%);
   background: var(--bg-elevated);
-  border-radius: 28px;
+  border-radius: var(--sticky-r-outer);
   padding: 20px 18px 16px;
   display: flex;
   flex-direction: column;
@@ -1183,14 +1219,15 @@ body.celebrating #tab-streak .week-calendar {
 }
 
 .modal-btn.ghost {
-  background: color-mix(in srgb, var(--text) 14%, var(--bg));
-  color: var(--text);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 18%, transparent);
+  background: var(--modal-btn-bg);
+  color: var(--modal-btn-text);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 14%, transparent);
 }
 
 .modal-btn.accent {
-  background: var(--accent);
-  color: var(--button-text);
+  background: var(--modal-btn-bg);
+  color: var(--accent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 14%, transparent);
 }
 
 body.tg-expand #app {
