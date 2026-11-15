@@ -63,6 +63,10 @@ function normalize(data) {
     const store = emptyStore();
     for (const d of DAYS) store[d] = normalizeDayData(data[d]);
     store.lists = data.lists || {};
+    store.profile = {
+      name: data.profile?.name || "",
+      motto: data.profile?.motto || "",
+    };
     store.streak = { ...store.streak, ...(data.streak || {}) };
     store.version = 2;
     store.updatedAt = data.updatedAt || null;
@@ -128,6 +132,10 @@ export async function saveStore(store) {
   }
 
   clean.streak = store.streak || clean.streak;
+  clean.profile = {
+    name: store.profile?.name || "",
+    motto: store.profile?.motto || "",
+  };
   clean.version = 2;
   clean.updatedAt = store.updatedAt;
   await apiPut(clean);

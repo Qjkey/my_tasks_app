@@ -6,6 +6,14 @@
   font-display: swap;
 }
 
+@font-face {
+  font-family: "Macintosh Skeletal";
+  src: url("../MacintoshSkeletalFilled%20(1).otf") format("opentype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   --bg: var(--tg-theme-secondary-bg-color, #1c1c1e);
   --bg-elevated: var(--tg-theme-bg-color, #2c2c2e);
@@ -644,6 +652,18 @@ body.edit-mode .expand-btn {
   opacity: 0.45;
 }
 
+/* в редакторе адаптивные списки открываются стрелкой */
+body.edit-mode .task-card[data-kind="listref"] .expand-btn {
+  pointer-events: auto;
+  opacity: 1;
+}
+
+body.edit-mode .row-trailing.edit-trailing {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
 body.edit-mode .delete-btn {
   pointer-events: auto;
   opacity: 1;
@@ -1071,4 +1091,71 @@ body.celebrating #tab-streak .week-calendar {
 
 body.tg-expand #app {
   min-height: 100dvh;
+}
+
+/* ===== Welcome splash ===== */
+.welcome-splash {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: #e8e8e8;
+  color: #111;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.55s ease;
+}
+
+.welcome-splash.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.welcome-splash.leaving {
+  opacity: 0;
+}
+
+.welcome-center {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  padding: 0 28px;
+}
+
+.welcome-greeting {
+  font-family: "Macintosh Skeletal", cursive;
+  font-size: clamp(2.1rem, 9vw, 3rem);
+  font-weight: 400;
+  line-height: 1.12;
+  text-align: center;
+  white-space: pre-line;
+  letter-spacing: 0.01em;
+  color: #0a0a0a;
+  min-height: 2.4em;
+}
+
+.welcome-motto {
+  position: absolute;
+  left: 24px;
+  right: 24px;
+  bottom: max(18%, env(safe-area-inset-bottom, 0px) + 12%);
+  margin: 0;
+  text-align: center;
+  font-family: var(--font);
+  font-size: 0.95rem;
+  font-weight: 650;
+  color: #111;
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 0.55s ease, transform 0.55s ease;
+}
+
+.welcome-motto.show {
+  opacity: 1;
+  transform: translateY(0);
 }

@@ -9,6 +9,13 @@
   <link rel="stylesheet" href="css/style.css" />
 </head>
 <body>
+  <div id="welcome-splash" class="welcome-splash" aria-hidden="true" hidden>
+    <div class="welcome-center">
+      <p id="welcome-greeting" class="welcome-greeting" aria-live="polite"></p>
+    </div>
+    <p id="welcome-motto" class="welcome-motto"></p>
+  </div>
+
   <div id="app">
     <!-- ===== Главная: задачи ===== -->
     <section id="tab-week" class="tab active" aria-label="Неделя">
@@ -102,8 +109,8 @@
     <div class="modal-backdrop" data-close="modal-code"></div>
     <div class="modal-sheet wide">
       <h2 id="modal-code-title">Код задач</h2>
-      <p class="modal-hint">Слоты: @[1] {09:00} (последний до 22:00). Задачи: [] @(1) { … }. Списки: [{1}] { … }, в дне: [{1}] @(2). Описание: | текст.</p>
-      <textarea id="code-textarea" class="code-area" spellcheck="false" placeholder="(понедельник)&#10;@[1] {09:00}&#10;[] @(1) { Задача | описание }"></textarea>
+      <p class="modal-hint">Слоты: @[1] {09:00} (последний до 22:00). Задачи: [] @(1) { … }. Повтор: [ 2н ]. Списки: [{1}] { … }, в дне: [{1}] @(2). Описание: | текст.</p>
+      <textarea id="code-textarea" class="code-area" spellcheck="false" placeholder="(понедельник)&#10;@[1] {09:00}&#10;[] @(1) { Задача | описание } [ 2н ]"></textarea>
       <div class="modal-actions">
         <button type="button" class="modal-btn ghost" data-close="modal-code">Отмена</button>
         <button type="button" class="modal-btn accent" id="btn-save-code">Сохранить</button>

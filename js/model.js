@@ -89,11 +89,36 @@ export function emptyStore() {
   const store = {
     version: 2,
     lists: {},
+    profile: { name: "", motto: "" },
     streak: { count: 0, lastSuccessDate: null, history: {}, statusWeek: null },
     updatedAt: null,
   };
   for (const d of DAYS) store[d] = emptyDay();
   return store;
+}
+
+/** Дата выбранного дня недели в календарной неделе refDate */
+export function dateKeyForDayName(dayName, refDate = new Date()) {
+  const idx = DAYS.indexOf(dayName);
+  if (idx < 0) return toDateKey(refDate);
+  return toDateKey(addDays(startOfWeek(refDate), idx));
+}
+
+/**
+ * Задача с [ Nн ] видна раз в N недель от recurAnchor (дата первого показа).
+ * Пример: пятница + 2н → эта пт есть, следующая пт нет, через одну — снова.
+ */
+export function isItemVisibleOnDate(item, dateKey) {
+  const n = Number(item.everyWeeks);
+  if (!n || n < 2) return true;
+  const anchor = item.recurAnchor;
+  if (!anchor || !dateKey) return true;
+  const a = parseDateKey(anchor);
+  const d = parseDateKey(dateKey);
+  const days = Math.round((d.getTime() - a.getTime()) / 86400000);
+  if (days < 0) return false;
+  const weeks = Math.floor(days / 7);
+  return weeks % n === 0;
 }
 
 /** Нормализация дня: массив (legacy) → { slots, items } */
@@ -175,12 +200,24 @@ function classifyMarker(marker) {
 
 const DAY_RE = /^\(\s*([^)]+?)\s*\)\s*$/u;
 const SLOT_RE = /^@\[(\d+)\]\s*\{\s*(\d{1,2}:\d{2})\s*\}\s*$/u;
-const LIST_REF_SLOT_RE = /^\[\{(\d+)\}\]\s*@\((\d+)\)\s*$/u;
-const LIST_REF_RE = /^\[\{(\d+)\}\]\s*$/u;
+const LIST_REF_SLOT_RE = /^\[\{(\d+)\}\]\s*@\((\d+)\)\s*(?:\[\s*(\d+)\s*н\s*\])?\s*$/u;
+const LIST_REF_RE = /^\[\{(\d+)\}\]\s*(?:\[\s*(\d+)\s*н\s*\])?\s*$/u;
 const LIST_DEF_RE = /^\[\{(\d+)\}\]\s*\{\s*(.*?)\s*\}\s*$/u;
-const TASK_SLOT_RE = /^(\[[^\]]*\])\s*@\((\d+)\)\s*\{\s*(.*?)\s*\}\s*$/u;
-const TASK_RE = /^(\[[^\]]*\])\s*\{\s*(.*?)\s*\}\s*$/u;
+const TASK_SLOT_RE =
+  /^(\[[^\]]*\])\s*@\((\d+)\)\s*\{\s*(.*?)\s*\}\s*(?:\[\s*(\d+)\s*н\s*\])?\s*$/u;
+const TASK_RE = /^(\[[^\]]*\])\s*\{\s*(.*?)\s*\}\s*(?:\[\s*(\d+)\s*н\s*\])?\s*$/u;
 const SUB_RE = /^\s*-\s*\{\s*(.*?)\s*\}\s*$/u;
+
+function parseEveryWeeks(raw) {
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 2 ? n : null;
+}
+
+function withPeriod(item, everyWeeksRaw) {
+  const everyWeeks = parseEveryWeeks(everyWeeksRaw);
+  if (everyWeeks) item.everyWeeks = everyWeeks;
+  return item;
+}
 
 export function parseTaskCode(text) {
   const days = Object.fromEntries(DAYS.map((d) => [d, emptyDay()]));
@@ -240,15 +277,20 @@ export function parseTaskCode(text) {
 
     const listRefSlot = trimmed.match(LIST_REF_SLOT_RE);
     if (listRefSlot && current) {
-      days[current].items.push({
-        title: "",
-        subtitle: "",
-        status: 0,
-        kind: "listref",
-        listId: listRefSlot[1],
-        slotId: listRefSlot[2],
-        tasks: [],
-      });
+      days[current].items.push(
+        withPeriod(
+          {
+            title: "",
+            subtitle: "",
+            status: 0,
+            kind: "listref",
+            listId: listRefSlot[1],
+            slotId: listRefSlot[2],
+            tasks: [],
+          },
+          listRefSlot[3]
+        )
+      );
       lastParent = null;
       lastList = null;
       continue;
@@ -256,15 +298,20 @@ export function parseTaskCode(text) {
 
     const listRef = trimmed.match(LIST_REF_RE);
     if (listRef && current) {
-      days[current].items.push({
-        title: "",
-        subtitle: "",
-        status: 0,
-        kind: "listref",
-        listId: listRef[1],
-        slotId: null,
-        tasks: [],
-      });
+      days[current].items.push(
+        withPeriod(
+          {
+            title: "",
+            subtitle: "",
+            status: 0,
+            kind: "listref",
+            listId: listRef[1],
+            slotId: null,
+            tasks: [],
+          },
+          listRef[2]
+        )
+      );
       lastParent = null;
       lastList = null;
       continue;
@@ -279,14 +326,17 @@ export function parseTaskCode(text) {
         continue;
       }
       const { title, subtitle } = splitTitleDesc(taskSlot[3]);
-      const item = {
-        title,
-        subtitle: meta.hasSubs ? "" : subtitle,
-        status: 0,
-        kind: meta.kind,
-        slotId: taskSlot[2],
-        tasks: [],
-      };
+      const item = withPeriod(
+        {
+          title,
+          subtitle: meta.hasSubs ? "" : subtitle,
+          status: 0,
+          kind: meta.kind,
+          slotId: taskSlot[2],
+          tasks: [],
+        },
+        taskSlot[4]
+      );
       days[current].items.push(item);
       lastParent = meta.hasSubs ? item : null;
       lastList = null;
@@ -302,14 +352,17 @@ export function parseTaskCode(text) {
         continue;
       }
       const { title, subtitle } = splitTitleDesc(taskMatch[2]);
-      const item = {
-        title,
-        subtitle: meta.hasSubs ? "" : subtitle,
-        status: 0,
-        kind: meta.kind,
-        slotId: null,
-        tasks: [],
-      };
+      const item = withPeriod(
+        {
+          title,
+          subtitle: meta.hasSubs ? "" : subtitle,
+          status: 0,
+          kind: meta.kind,
+          slotId: null,
+          tasks: [],
+        },
+        taskMatch[3]
+      );
       days[current].items.push(item);
       lastParent = meta.hasSubs ? item : null;
       lastList = null;
@@ -345,6 +398,11 @@ function slotAttr(item) {
   return item.slotId != null && item.slotId !== "" ? ` @(${item.slotId})` : "";
 }
 
+function periodAttr(item) {
+  const n = Number(item.everyWeeks);
+  return n >= 2 ? ` [ ${n}н ]` : "";
+}
+
 export function serializeToCode(store) {
   const lines = [];
   for (const day of DAYS) {
@@ -356,18 +414,20 @@ export function serializeToCode(store) {
     }
     for (const item of dayData.items || []) {
       if (item.kind === "listref" && item.listId) {
-        lines.push(`[{${item.listId}}]${slotAttr(item)}`);
+        lines.push(`[{${item.listId}}]${slotAttr(item)}${periodAttr(item)}`);
         continue;
       }
       const hasSubs = item.tasks?.length > 0;
       if (hasSubs || item.kind === "group") {
-        lines.push(`[{}]${slotAttr(item)} { ${item.title || ""} }`);
+        lines.push(`[{}]${slotAttr(item)} { ${item.title || ""} }${periodAttr(item)}`);
         for (const sub of item.tasks || []) {
           lines.push(`    - { ${formatTitle(sub.title, sub.subtitle)} }`);
         }
       } else {
         const mark = markerFor(item);
-        lines.push(`${mark}${slotAttr(item)} { ${formatTitle(item.title, item.subtitle)} }`);
+        lines.push(
+          `${mark}${slotAttr(item)} { ${formatTitle(item.title, item.subtitle)} }${periodAttr(item)}`
+        );
       }
     }
     lines.push("");
@@ -424,10 +484,16 @@ export function resolveDayItems(store, dayName) {
   });
 }
 
-/** Слоты по номеру; задачи внутри — порядок массива дня. Пустой слот → items []. */
-export function groupDayBySlots(store, dayName) {
+/**
+ * Слоты по номеру; задачи внутри — порядок массива дня.
+ * Задачи с [ Nн ] фильтруются по dateKey; слот без видимых задач не показывается.
+ */
+export function groupDayBySlots(store, dayName, dateKey = null) {
+  const key = dateKey || dateKeyForDayName(dayName);
   const slots = finalizeSlots(getDaySlots(store, dayName));
-  const items = resolveDayItems(store, dayName);
+  const items = resolveDayItems(store, dayName).filter((it) =>
+    isItemVisibleOnDate(it, key)
+  );
 
   if (!slots.length) {
     if (!items.length) return [];
@@ -435,11 +501,14 @@ export function groupDayBySlots(store, dayName) {
   }
 
   const now = new Date();
-  return slots.map((slot) => ({
-    ...slot,
-    active: isSlotActive(slot, now),
-    items: items.filter((it) => String(it.slotId) === String(slot.id)),
-  }));
+  const todayName = dayNameFromDate(now);
+  return slots
+    .map((slot) => ({
+      ...slot,
+      active: dayName === todayName && isSlotActive(slot, now),
+      items: items.filter((it) => String(it.slotId) === String(slot.id)),
+    }))
+    .filter((g) => g.items.length > 0);
 }
 
 export function itemIsDone(item) {
@@ -480,26 +549,45 @@ export function setItemStatus(store, dayName, itemIndex, status, subIndex = null
   }
 }
 
-function mergeItemStatus(prev, next) {
-  if (!prev) return next;
+function attachRecurMeta(item, prev, dayName) {
+  const everyWeeks = parseEveryWeeks(item.everyWeeks);
+  if (!everyWeeks) {
+    const clean = { ...item };
+    delete clean.everyWeeks;
+    delete clean.recurAnchor;
+    return clean;
+  }
+  const recurAnchor =
+    prev?.everyWeeks && prev?.recurAnchor
+      ? prev.recurAnchor
+      : dateKeyForDayName(dayName || dayNameFromDate());
+  return { ...item, everyWeeks, recurAnchor };
+}
+
+function mergeItemStatus(prev, next, dayName) {
+  if (!prev) return attachRecurMeta(next, null, dayName);
   if (next.kind === "listref") {
-    return { ...next, status: prev.status ? 1 : 0 };
+    return attachRecurMeta({ ...next, status: prev.status ? 1 : 0 }, prev, dayName);
   }
   const byTitle = new Map((prev.tasks || []).map((t) => [t.title, t]));
-  return {
-    ...next,
-    status: prev.status ? 1 : next.status ? 1 : 0,
-    subtitle: next.subtitle || prev.subtitle || "",
-    slotId: next.slotId != null ? next.slotId : prev.slotId ?? null,
-    tasks: (next.tasks || []).map((t) => {
-      const p = byTitle.get(t.title);
-      return {
-        ...t,
-        status: p?.status ? 1 : t.status ? 1 : 0,
-        subtitle: t.subtitle || p?.subtitle || "",
-      };
-    }),
-  };
+  return attachRecurMeta(
+    {
+      ...next,
+      status: prev.status ? 1 : next.status ? 1 : 0,
+      subtitle: next.subtitle || prev.subtitle || "",
+      slotId: next.slotId != null ? next.slotId : prev.slotId ?? null,
+      tasks: (next.tasks || []).map((t) => {
+        const p = byTitle.get(t.title);
+        return {
+          ...t,
+          status: p?.status ? 1 : t.status ? 1 : 0,
+          subtitle: t.subtitle || p?.subtitle || "",
+        };
+      }),
+    },
+    prev,
+    dayName
+  );
 }
 
 export function applyCode(store, codeText) {
@@ -511,10 +599,10 @@ export function applyCode(store, codeText) {
         const p = prevItems.find(
           (x) => x.kind === "listref" && String(x.listId) === String(item.listId)
         );
-        return { ...item, status: p?.status ? 1 : 0 };
+        return mergeItemStatus(p, item, day);
       }
       const p = prevItems.find((x) => x.kind !== "listref" && x.title === item.title);
-      return mergeItemStatus(p, item);
+      return mergeItemStatus(p, item, day);
     });
     store[day] = {
       slots: finalizeSlots(parsed.days[day]?.slots || []),
@@ -553,6 +641,10 @@ export function applyCode(store, codeText) {
 /** Миграция старого store v1 / плоских массивов дней → { slots, items } */
 export function migrateFromV1(old) {
   const store = emptyStore();
+  store.profile = {
+    name: old.profile?.name || "",
+    motto: old.profile?.motto || "",
+  };
   store.streak = {
     count: old.streak?.count || 0,
     lastSuccessDate: old.streak?.lastSuccessDate || null,
@@ -672,7 +764,7 @@ export function migrateFromV1(old) {
         const p = byTitle.get(item.title);
         if (!p) return item;
         byTitle.delete(item.title);
-        return mergeItemStatus(p, item);
+        return mergeItemStatus(p, item, dayName);
       });
       for (const p of byTitle.values()) day.items.push(p);
     } else if (fromOld.length && !day.items.length) {
@@ -687,4 +779,17 @@ export function isV2(data) {
   if (!data) return false;
   if (data.version === 2) return true;
   return DAYS.every((d) => Array.isArray(data[d]) || (data[d] && Array.isArray(data[d].items)));
+}
+
+/** Проставить recurAnchor задачам с [ Nн ], у которых якоря ещё нет */
+export function ensureRecurAnchors(store, refDate = new Date()) {
+  for (const day of DAYS) {
+    for (const item of getDayItems(store, day)) {
+      const n = Number(item.everyWeeks);
+      if (n >= 2 && !item.recurAnchor) {
+        item.recurAnchor = dateKeyForDayName(day, refDate);
+      }
+    }
+  }
+  if (!store.profile) store.profile = { name: "", motto: "" };
 }

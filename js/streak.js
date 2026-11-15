@@ -19,14 +19,17 @@ import {
   resolveDayItems,
   itemIsDone,
   getDayItems,
+  isItemVisibleOnDate,
+  dateKeyForDayName,
 } from "./model.js";
 
-export function requiredItems(store, dayName) {
-  return resolveDayItems(store, dayName);
+export function requiredItems(store, dayName, dateKey = null) {
+  const key = dateKey || dateKeyForDayName(dayName);
+  return resolveDayItems(store, dayName).filter((it) => isItemVisibleOnDate(it, key));
 }
 
-export function isDayFullyDone(store, dayName) {
-  const req = requiredItems(store, dayName);
+export function isDayFullyDone(store, dayName, dateKey = null) {
+  const req = requiredItems(store, dayName, dateKey);
   if (!req.length) return false;
   return req.every((t) => itemIsDone(t));
 }
@@ -34,7 +37,7 @@ export function isDayFullyDone(store, dayName) {
 function dayParticipates(store, dateKey) {
   const [y, m, d] = dateKey.split("-").map(Number);
   const dayName = dayNameFromDate(new Date(y, m - 1, d));
-  return requiredItems(store, dayName).length > 0;
+  return requiredItems(store, dayName, dateKey).length > 0;
 }
 
 function ensureStreak(store) {
@@ -78,7 +81,7 @@ function syncTodayHistory(store, today = new Date()) {
     return;
   }
 
-  if (isDayFullyDone(store, todayName)) {
+  if (isDayFullyDone(store, todayName, todayKey)) {
     store.streak.history[todayKey] = true;
   } else {
     delete store.streak.history[todayKey];

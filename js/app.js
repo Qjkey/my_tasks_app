@@ -9,6 +9,7 @@ import {
   capitalize,
   dayNameFromDate,
   toDateKey,
+  dateKeyForDayName,
   emptyStore,
   resolveDayItems,
   setItemStatus,
@@ -17,6 +18,7 @@ import {
   getDayItems,
   getDaySlots,
   ensureDay,
+  ensureRecurAnchors,
 } from "./model.js";
 import { loadStore, saveStore, applyTemplate, getCodeText } from "./storage.js";
 import {
@@ -163,9 +165,19 @@ function descBlock(id, text) {
   </div>`;
 }
 
+function isListrefItem(item) {
+  return item.kind === "listref" || !!item.fromList;
+}
+
 function trailingSlot(opts) {
-  const { id, hasSubs, hasDesc, deleteAttr, doneCount, total, urgent } = opts;
+  const { id, hasSubs, hasDesc, deleteAttr, doneCount, total, urgent, listref } = opts;
   if (state.editMode) {
+    if (listref && hasSubs) {
+      return `<div class="row-trailing edit-trailing">
+        <button type="button" class="expand-btn" data-expand="${id}" aria-label="Открыть список">${CHEVRON_ICON}</button>
+        <button type="button" class="delete-btn" ${deleteAttr} aria-label="Удалить">${DELETE_ICON}</button>
+      </div>`;
+    }
     return `<button type="button" class="delete-btn" ${deleteAttr} aria-label="Удалить">${DELETE_ICON}</button>`;
   }
   if (hasSubs) {
@@ -207,7 +219,13 @@ function homeworkMetaForItem(item) {
 function renderTaskCard(item) {
   const id = itemId(item.index);
   const hasSubs = item.tasks?.length > 0;
-  const expanded = state.editMode ? hasSubs : state.expanded.has(id);
+  const listref = isListrefItem(item);
+  // адаптивные списки — только вручную; обычные группы в edit раскрыты
+  const expanded = listref
+    ? state.expanded.has(id)
+    : state.editMode
+      ? hasSubs
+      : state.expanded.has(id);
   const done = itemIsDone(item);
   const desc = item.subtitle || "";
   const showDesc = !!desc;
@@ -258,6 +276,7 @@ function renderTaskCard(item) {
         doneCount,
         total,
         urgent: listUrgent,
+        listref,
       })}
     </div>
     ${descBlock(id, desc)}
@@ -321,23 +340,17 @@ function renderSlotBoundary(time, accent) {
 function renderTasks(opts = {}) {
   const { scrollToActive = false } = opts;
   const list = $("#task-list");
-  const groups = groupDayBySlots(state.store, state.selectedDay);
+  const dateKey = dateKeyForDayName(state.selectedDay);
+  const groups = groupDayBySlots(state.store, state.selectedDay, dateKey);
 
   $("#current-day-label").textContent = capitalize(state.selectedDay);
 
   if (state.editMode) {
+    // обычные группы с подзадачами раскрыты; listref — только вручную
     for (const g of groups) {
       for (const item of g.items) {
+        if (isListrefItem(item)) continue;
         if (item.tasks?.length) state.expanded.add(itemId(item.index));
-      }
-    }
-  } else {
-    // адаптивные списки никогда не держим раскрытыми «сами»
-    for (const g of groups) {
-      for (const item of g.items) {
-        if (item.kind === "listref" || item.fromList) {
-          state.expanded.delete(itemId(item.index));
-        }
       }
     }
   }
@@ -522,16 +535,32 @@ function renderLists() {
     .join("");
 }
 
+function collapseDayExpanded() {
+  for (const id of [...state.expanded]) {
+    if (String(id).startsWith("i")) state.expanded.delete(id);
+  }
+  for (const id of [...state.descOpen]) {
+    if (String(id).startsWith("i")) state.descOpen.delete(id);
+  }
+}
+
+function collapseListrefsInDay() {
+  if (!state.store) return;
+  const items = resolveDayItems(state.store, state.selectedDay);
+  for (const item of items) {
+    if (isListrefItem(item)) state.expanded.delete(itemId(item.index));
+  }
+}
+
 function toggleEdit(force) {
   const next = typeof force === "boolean" ? force : !state.editMode;
+  if (!state.editMode && next) {
+    // вход в редактор — все адаптивные списки свёрнуты
+    collapseListrefsInDay();
+  }
   // выход из редактирования — свернуть все группы/подзадачи как до edit
   if (state.editMode && !next) {
-    for (const id of [...state.expanded]) {
-      if (String(id).startsWith("i")) state.expanded.delete(id);
-    }
-    for (const id of [...state.descOpen]) {
-      if (String(id).startsWith("i")) state.descOpen.delete(id);
-    }
+    collapseDayExpanded();
   }
   state.editMode = next;
   document.body.classList.toggle("edit-mode", state.editMode);
@@ -653,7 +682,7 @@ async function persist(opts = {}) {
 
   renderStreak();
 
-  if (!skipCelebrate && !wasDone && nowDone && isDayFullyDone(state.store, todayName)) {
+  if (!skipCelebrate && !wasDone && nowDone && isDayFullyDone(state.store, todayName, todayKey)) {
     playStreakCelebration();
   } else if (after > before) {
     tg()?.HapticFeedback?.notificationOccurred?.("success");
@@ -1009,12 +1038,11 @@ function bindEvents() {
       return;
     }
 
-    if (state.editMode) return;
-
     const card = e.target.closest(".task-card");
 
     const expand = e.target.closest("[data-expand]");
     if (expand) {
+      e.stopPropagation();
       const id = expand.dataset.expand;
       if (state.expanded.has(id)) state.expanded.delete(id);
       else state.expanded.add(id);
@@ -1026,6 +1054,8 @@ function bindEvents() {
       }
       return;
     }
+
+    if (state.editMode) return;
 
     const toggle = e.target.closest("[data-toggle-item]");
     if (toggle) {
@@ -1161,6 +1191,87 @@ function bindEvents() {
   });
 }
 
+function ensureProfileFields() {
+  if (!state.store.profile) state.store.profile = { name: "", motto: "" };
+  return state.store.profile;
+}
+
+/** Первый запуск: спросить имя и мотивацию через prompt */
+async function ensureProfile() {
+  const p = ensureProfileFields();
+  let changed = false;
+
+  if (!String(p.name || "").trim()) {
+    const raw = window.prompt("Ваше имя (для надписи «Имя, С возвращением»):", "");
+    const name = String(raw || "").trim();
+    if (name) {
+      p.name = name;
+      changed = true;
+    } else {
+      p.name = "Друг";
+      changed = true;
+    }
+  }
+
+  if (!String(p.motto || "").trim()) {
+    const raw = window.prompt("Мотивационная надпись:", "Действие рождает мотивацию");
+    const motto = String(raw || "").trim();
+    p.motto = motto || "Действие рождает мотивацию";
+    changed = true;
+  }
+
+  if (changed) {
+    try {
+      await saveStore(state.store);
+    } catch (_) {}
+  }
+  return p;
+}
+
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/** Приветственный экран: печать имени шрифтом + fade девиза, затем уход */
+async function playWelcomeSplash() {
+  const p = ensureProfileFields();
+  const splash = $("#welcome-splash");
+  const greetEl = $("#welcome-greeting");
+  const mottoEl = $("#welcome-motto");
+  if (!splash || !greetEl || !mottoEl) return;
+
+  const line1 = `${p.name},`;
+  const line2 = "С возвращением";
+  const full = `${line1}\n${line2}`;
+
+  splash.hidden = false;
+  splash.setAttribute("aria-hidden", "false");
+  splash.classList.add("visible");
+  greetEl.textContent = "";
+  mottoEl.textContent = p.motto;
+  mottoEl.classList.remove("show");
+
+  // печать по символам (~0.9 с)
+  const chars = [...full];
+  const step = Math.max(28, Math.min(55, Math.floor(900 / Math.max(chars.length, 1))));
+  for (let i = 0; i < chars.length; i++) {
+    greetEl.textContent += chars[i];
+    await sleep(step);
+  }
+
+  mottoEl.classList.add("show");
+  await sleep(900);
+
+  splash.classList.add("leaving");
+  await sleep(550);
+
+  splash.classList.remove("visible", "leaving");
+  splash.hidden = true;
+  splash.setAttribute("aria-hidden", "true");
+  greetEl.textContent = "";
+  mottoEl.classList.remove("show");
+}
+
 async function boot() {
   initTelegram();
   renderDayMenu();
@@ -1176,6 +1287,9 @@ async function boot() {
     );
   }
 
+  ensureRecurAnchors(state.store);
+  await ensureProfile();
+
   evaluateStreak(state.store, new Date());
   ensureWeekTaskStatuses(state.store, new Date());
   try {
@@ -1185,12 +1299,16 @@ async function boot() {
   state.selectedDay = dayNameFromDate(new Date());
   // сброс раскрытий списков при старте
   for (const id of [...state.expanded]) {
-    if (String(id).startsWith("L")) state.expanded.delete(id);
+    if (String(id).startsWith("L") || String(id).startsWith("i")) {
+      state.expanded.delete(id);
+    }
   }
   renderDayMenu();
   renderTasks({ scrollToActive: true });
   renderStreak();
   syncTelegramChrome();
+
+  await playWelcomeSplash();
 
   // обновлять активный слот раз в минуту
   setInterval(() => {
