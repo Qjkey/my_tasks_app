@@ -199,7 +199,7 @@ textarea {
 .edit-toolbar {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 1px;
+  gap: 5px;
   padding: 0 14px 10px;
   background: var(--bg);
   animation: fade 0.2s ease;
@@ -236,17 +236,17 @@ textarea {
   color: var(--button-text);
 }
 
-/* «слипнутые» скругления: с краю 50%, у стыка 15px */
+/* «слипнутые» скругления: с краю ~половина (100px), у стыка 15px */
 .sticky-group {
-  gap: 1px;
+  gap: 5px;
 }
 
 .sticky-group > :first-child:not(:last-child) {
-  border-radius: 50% 15px 15px 50%;
+  border-radius: 100px 15px 15px 100px;
 }
 
 .sticky-group > :last-child:not(:first-child) {
-  border-radius: 15px 50% 50% 15px;
+  border-radius: 15px 100px 100px 15px;
 }
 
 .sticky-group > :not(:first-child):not(:last-child) {
@@ -254,7 +254,7 @@ textarea {
 }
 
 .sticky-group > :only-child {
-  border-radius: 22px;
+  border-radius: 100px;
 }
 
 @keyframes fade {
@@ -1079,13 +1079,31 @@ body.celebrating #tab-streak .week-calendar {
 
 .modal-code-header {
   display: grid;
-  grid-template-columns: 44px 1fr 44px;
+  grid-template-columns: 40px 1fr 40px;
   align-items: center;
-  gap: 4px;
+  gap: 8px;
 }
 
 .modal-code-header h2 {
   margin: 0;
+}
+
+.modal-code-header .icon-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--card);
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.modal-code-header .icon-btn:active {
+  transform: scale(0.94);
+}
+
+.modal-code-header .icon-btn[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--accent);
 }
 
 .modal-help-body {
@@ -1151,7 +1169,7 @@ body.celebrating #tab-streak .week-calendar {
 .modal-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 1px;
+  gap: 5px;
 }
 
 .modal-btn {

@@ -798,18 +798,26 @@ function playStreakCelebration() {
   }, 2800);
 }
 
+const FS_ICON_EXPAND = `<polyline points="15 3 21 3 21 9"></polyline>
+            <polyline points="9 21 3 21 3 15"></polyline>
+            <line x1="21" y1="3" x2="14" y2="10"></line>
+            <line x1="3" y1="21" x2="10" y2="14"></line>`;
+
+const FS_ICON_COLLAPSE = `<polyline points="4 14 10 14 10 20"></polyline>
+            <polyline points="20 10 14 10 14 4"></polyline>
+            <line x1="10" y1="14" x2="3" y2="21"></line>
+            <line x1="14" y1="10" x2="21" y2="3"></line>`;
+
 function setCodeFullscreen(on) {
   const modal = $("#modal-code");
   const btn = $("#btn-code-fullscreen");
+  const icon = $("#icon-code-fs");
   if (!modal || !btn) return;
   modal.classList.toggle("modal-fullscreen", !!on);
   btn.setAttribute("aria-pressed", on ? "true" : "false");
   btn.title = on ? "Обычный режим" : "На весь экран";
   btn.setAttribute("aria-label", on ? "Обычный режим" : "На весь экран");
-  const expand = btn.querySelector(".fs-expand");
-  const collapse = btn.querySelector(".fs-collapse");
-  if (expand) expand.hidden = !!on;
-  if (collapse) collapse.hidden = !on;
+  if (icon) icon.innerHTML = on ? FS_ICON_COLLAPSE : FS_ICON_EXPAND;
 }
 
 function openModal(id) {
