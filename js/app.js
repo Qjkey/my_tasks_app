@@ -66,42 +66,20 @@ function tg() {
   return window.Telegram?.WebApp || null;
 }
 
-function detectColorScheme() {
-  const w = tg();
-  if (w?.colorScheme === "light" || w?.colorScheme === "dark") return w.colorScheme;
-  if (window.matchMedia?.("(prefers-color-scheme: light)")?.matches) return "light";
-  return "dark";
-}
-
-function applyAppTheme() {
-  const scheme = detectColorScheme();
-  document.documentElement.setAttribute("data-theme", scheme);
-  document.documentElement.style.colorScheme = scheme;
-
-  const bg = scheme === "dark" ? "#000000" : "#f1f1f3";
-  const header = scheme === "dark" ? "#252524" : "#ffffff";
-  const w = tg();
-  if (!w) return;
-  try {
-    w.setHeaderColor(header);
-    w.setBackgroundColor(bg);
-  } catch (_) {}
-}
-
 function initTelegram() {
   const w = tg();
-  applyAppTheme();
-  if (!w) {
-    window.matchMedia?.("(prefers-color-scheme: dark)")?.addEventListener?.("change", applyAppTheme);
-    return;
-  }
+  if (!w) return;
   w.ready();
   w.expand();
   document.body.classList.add("tg-expand");
-  applyAppTheme();
 
+  const secondary =
+    w.themeParams?.secondary_bg_color ||
+    getComputedStyle(document.documentElement).getPropertyValue("--tg-theme-secondary-bg-color").trim() ||
+    "#1a1d21";
   try {
-    w.onEvent?.("themeChanged", applyAppTheme);
+    w.setHeaderColor(secondary);
+    w.setBackgroundColor(secondary);
   } catch (_) {}
 
   try {
