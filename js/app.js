@@ -1232,21 +1232,24 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-/** Приветственный экран: печать имени шрифтом + fade девиза, затем уход */
+/** Приветственный экран уже в DOM; только анимация текста → пауза 3с → уход */
 async function playWelcomeSplash() {
   const p = ensureProfileFields();
   const splash = $("#welcome-splash");
   const greetEl = $("#welcome-greeting");
   const mottoEl = $("#welcome-motto");
-  if (!splash || !greetEl || !mottoEl) return;
+  if (!splash || !greetEl || !mottoEl) {
+    document.body.classList.remove("welcome-active");
+    return;
+  }
 
   const line1 = `${p.name},`;
   const line2 = "С возвращением";
   const full = `${line1}\n${line2}`;
 
   splash.hidden = false;
+  splash.classList.remove("leaving");
   splash.setAttribute("aria-hidden", "false");
-  splash.classList.add("visible");
   greetEl.textContent = "";
   mottoEl.textContent = p.motto;
   mottoEl.classList.remove("show");
@@ -1260,16 +1263,18 @@ async function playWelcomeSplash() {
   }
 
   mottoEl.classList.add("show");
-  await sleep(900);
+  // пауза после окончания анимации текста перед переходом в планер
+  await sleep(3000);
 
   splash.classList.add("leaving");
   await sleep(550);
 
-  splash.classList.remove("visible", "leaving");
+  splash.classList.remove("leaving");
   splash.hidden = true;
   splash.setAttribute("aria-hidden", "true");
   greetEl.textContent = "";
   mottoEl.classList.remove("show");
+  document.body.classList.remove("welcome-active");
 }
 
 async function boot() {

@@ -8,8 +8,9 @@
   <script src="js/tma.js"></script>
   <link rel="stylesheet" href="css/style.css" />
 </head>
-<body>
-  <div id="welcome-splash" class="welcome-splash" aria-hidden="true" hidden>
+<body class="welcome-active">
+  <!-- сразу на экране, без fade-in; планер скрыт классом welcome-active -->
+  <div id="welcome-splash" class="welcome-splash" aria-hidden="false">
     <div class="welcome-center">
       <p id="welcome-greeting" class="welcome-greeting" aria-live="polite"></p>
     </div>

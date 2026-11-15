@@ -1094,6 +1094,12 @@ body.tg-expand #app {
 }
 
 /* ===== Welcome splash ===== */
+/* планер не виден, пока идёт приветствие */
+body.welcome-active #app {
+  visibility: hidden;
+  pointer-events: none;
+}
+
 .welcome-splash {
   position: fixed;
   inset: 0;
@@ -1102,20 +1108,20 @@ body.tg-expand #app {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  background: #e8e8e8;
-  color: #111;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.55s ease;
-}
-
-.welcome-splash.visible {
+  background: var(--bg);
+  color: var(--text);
   opacity: 1;
   pointer-events: auto;
 }
 
+.welcome-splash[hidden] {
+  display: none;
+}
+
 .welcome-splash.leaving {
   opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.55s ease;
 }
 
 .welcome-center {
@@ -1135,7 +1141,7 @@ body.tg-expand #app {
   text-align: center;
   white-space: pre-line;
   letter-spacing: 0.01em;
-  color: #0a0a0a;
+  color: var(--text);
   min-height: 2.4em;
 }
 
@@ -1149,7 +1155,7 @@ body.tg-expand #app {
   font-family: var(--font);
   font-size: 0.95rem;
   font-weight: 650;
-  color: #111;
+  color: var(--text);
   opacity: 0;
   transform: translateY(8px);
   transition: opacity 0.55s ease, transform 0.55s ease;
